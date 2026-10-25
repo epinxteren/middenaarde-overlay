@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.2.3).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.2.4).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -31,7 +31,9 @@ The EXE is unsigned. If your Windows policy prevents it from running, use your n
 
 ## Controls
 
-Version 0.2.3 adds **Vertaal vanaf** (minimum English block length, default 30 characters; 0 disables filtering) and a click-through status panel in the top-right of the game. It reports recognition, translation, speech loading, playback and errors. Settings are saved in `data/ui.ini`.
+**Klik op vertaling om voor te lezen / stoppen** (enabled by default): click a translated panel to read that block; click the same block again to stop loading or playback. Disable this option to pass all clicks through to the game. With it enabled, translated panels capture clicks; uncovered game areas remain clickable.
+
+Version 0.2.3 adds **Vertaal vanaf** (minimum English block length, default 30 characters; 0 disables filtering) and a click-through status panel in the top-right of the game. A compact indicator reports recognition, translation, speech loading and errors; it disappears during playback and when ready. Settings are saved in `data/ui.ini`.
 
 
 | Dutch control | What it does |

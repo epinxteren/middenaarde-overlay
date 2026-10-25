@@ -161,6 +161,8 @@ class Speaker:
         self.queue = queue.Queue()
         self.generation = 0
         self.closed = False
+        self.busy = False
+        self.current_text = ''
         self.lock = threading.Lock()
         self.cache = {}
         threading.Thread(target=self.run, daemon=True).start()
@@ -176,10 +178,14 @@ class Speaker:
     def stop(self):
         with self.lock:
             self.generation += 1
+            self.busy = False
             winsound.PlaySound(None, 0)
+            self.events.put(('speech_status', (self.generation, '')))
 
     def say(self, text, settings=None, keys=None):
         self.stop()
+        self.current_text = text
+        self.busy = True
         self.queue.put((self.generation, text, copy.deepcopy(settings or self.settings), dict(self.keys if keys is None else keys)))
 
     def run(self):
@@ -219,12 +225,14 @@ class Speaker:
                     with self.lock:
                         if generation != self.generation or self.closed: break
                         winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
-                    self.events.put(('speech_status', (generation, 'Voorlezen…')))
+                    self.events.put(('speech_status', (generation, '')))
                     deadline = time.monotonic()+duration
                     while generation == self.generation and not self.closed and time.monotonic()<deadline: time.sleep(.05)
                 if generation == self.generation and not self.closed:
-                    self.events.put(('speech_status', (generation, 'Gereed')))
+                    self.busy = False
+                    self.events.put(('speech_status', (generation, '')))
             except Exception as exc:
                 if generation == self.generation:
+                    self.busy = False
                     message = str(exc) if isinstance(exc, SpeechError) else 'Spraak maken mislukt. Controleer provider, stem en verbinding.'
                     self.events.put(('speech_error', message))

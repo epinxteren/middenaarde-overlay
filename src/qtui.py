@@ -40,6 +40,8 @@ class Overlay(QWidget):
         self.setStyleSheet('background:#ff00ff;')
         self.blocks = []
         self.progress_text = ''
+        self.click_handler = None
+        self.click_regions = []
         self.hwnd = native_handle(self)
         bits = user32.GetWindowLongW(self.hwnd, -20)
         user32.SetWindowLongW(self.hwnd, -20, bits | 0x80000 | 0x20 | 0x08000000)
@@ -55,6 +57,7 @@ class Overlay(QWidget):
         ratio = self.devicePixelRatioF()
         painter.scale(1/ratio, 1/ratio)
         physical_width, physical_height = int(self.width()*ratio), int(self.height()*ratio)
+        self.click_regions = []
         for block in self.blocks:
             if not block.translated: continue
             x, y = max(0, int(block.x)-5), max(0, int(block.y)-3)
@@ -75,21 +78,38 @@ class Overlay(QWidget):
             painter.setPen(QPen(QColor('#9c8451'), 1))
             painter.setBrush(QColor('#211e18'))
             painter.drawRoundedRect(QRect(x, y, w, draw_h), 3, 3)
+            self.click_regions.append((QRect(x, y, w, draw_h), block.translated))
             painter.setPen(QColor('#f5e8c7'))
             painter.setFont(font)
             painter.drawText(QRect(x+5, y+3, w-10, draw_h-6), flags, block.translated)
 
         if self.progress_text:
-            status_width = min(560, physical_width-16)
+            font = QFont('Segoe UI'); font.setPixelSize(13)
+            status_width = min(460, physical_width-16, QFontMetrics(font).horizontalAdvance(self.progress_text)+20)
             if status_width > 40:
-                status_rect = QRect(physical_width-status_width-8, 8, status_width, 56)
+                status_rect = QRect(physical_width-status_width-8, 8, status_width, 32 if len(self.progress_text)<65 else 62)
                 painter.setPen(QPen(QColor('#9c8451'), 1))
                 painter.setBrush(QColor('#17212b'))
                 painter.drawRoundedRect(status_rect, 5, 5)
-                font = QFont('Segoe UI'); font.setPixelSize(16)
                 painter.setFont(font); painter.setPen(QColor('#f0d699'))
                 painter.drawText(status_rect.adjusted(10, 4, -10, -4),
                     int(Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap), self.progress_text)
+
+    def set_click_handler(self, handler):
+        self.click_handler = handler
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, handler is None)
+        bits = user32.GetWindowLongW(self.hwnd, -20)
+        user32.SetWindowLongW(self.hwnd, -20, (bits & ~0x20) if handler else (bits | 0x20))
+
+    def mousePressEvent(self, event):
+        if self.click_handler and event.button() == Qt.MouseButton.LeftButton:
+            point = event.position()*self.devicePixelRatioF()
+            for rect, text in reversed(self.click_regions):
+                if rect.contains(point.toPoint()):
+                    self.click_handler(text)
+                    event.accept()
+                    return
+        event.ignore()
 
     def show_progress(self, box, text, clear=False):
         if clear: self.blocks = []
@@ -224,6 +244,10 @@ class App:
         self.minimum_length.valueChanged.connect(self.change_minimum_length)
         length_row.addWidget(self.minimum_length, 1)
         layout.addLayout(length_row)
+        self.click_to_speak = QCheckBox('Klik op vertaling om voor te lezen / stoppen')
+        self.click_to_speak.setChecked(self.preferences.value('click_to_speak', True, type=bool))
+        self.click_to_speak.toggled.connect(self.change_click_to_speak)
+        layout.addWidget(self.click_to_speak)
         areas = QHBoxLayout()
         pick = QPushButton('Kies tekstgebied'); pick.clicked.connect(self.select_region)
         areas.addWidget(pick)
@@ -246,6 +270,7 @@ class App:
         self.capture_ok = self.overlay.capture_ok
         user32.SetWindowDisplayAffinity(native_handle(self.root), 0x11)
         self.speaker = Speaker(self.events)
+        self.overlay.set_click_handler(self.click_speech if self.click_to_speak.isChecked() else None)
         self.hotkeys = []
         self.hotkey_filter = Hotkeys(self)
         self.qt.installNativeEventFilter(self.hotkey_filter)
@@ -296,6 +321,18 @@ class App:
 
     def repeat(self):
         if self.latest_text: self.speaker.say(self.latest_text)
+
+    def click_speech(self, text):
+        if self.speaker.busy and self.speaker.current_text == text:
+            self.speaker.stop()
+            self.show_progress('')
+        else:
+            self.speaker.say(text)
+
+    def change_click_to_speak(self, enabled):
+        self.preferences.setValue('click_to_speak', enabled)
+        self.preferences.sync()
+        self.overlay.set_click_handler(self.click_speech if enabled else None)
 
     def change_minimum_length(self, value):
         self.min_chars = value
@@ -427,10 +464,13 @@ class App:
                 self.show_progress('Voorlezen mislukt: '+value[:140])
             elif kind == 'speech_status':
                 generation, message = value
-                if generation == self.speaker.generation: self.show_progress(message)
+                if generation == self.speaker.generation:
+                    if message or self.overlay.progress_text == 'Spraak laden…': self.show_progress(message)
             elif kind == 'status' and self.enabled.is_set():
                 self.status.setText(value)
-                self.show_progress(value)
+                if 'mislukt' in value.lower(): self.show_progress(value)
+                elif 'maken' in value.lower(): self.show_progress('Vertalen…')
+                else: self.show_progress('')
             elif kind == 'clear' and value == self.epoch:
                 self.overlay.hide()
                 self.speaker.stop()
@@ -438,7 +478,7 @@ class App:
             elif kind == 'render':
                 epoch, hwnd, box, blocks, signature = value
                 if epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
-                self.overlay.progress_text = f'Vertaling gereed · {len(blocks)} tekstvlakken'
+                self.overlay.progress_text = ''
                 self.overlay.render_blocks(box, blocks)
                 self.last_game_box = box
                 narrative = [b.translated for b in blocks if len(b.text) >= 65]
