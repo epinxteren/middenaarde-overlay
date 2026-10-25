@@ -1,0 +1,13 @@
+.venv/
+lib/
+model/
+voice/
+data/
+dist/
+build/
+__pycache__/
+*.pyc
+*.zip
+*.wav
+self-test.json
+startup-error.txt

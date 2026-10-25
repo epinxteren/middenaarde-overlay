@@ -1,0 +1,14 @@
+ctranslate2==4.8.3
+sentencepiece==0.2.2
+Pillow==13.0.0
+PySide6-Essentials==6.12.0
+piper-tts==1.8.0
+onnxruntime==1.31.0
+winrt-runtime==4.0.3
+winrt-Windows.Media.Ocr==4!10.0.28000.2705
+winrt-Windows.Globalization==4!10.0.28000.2705
+winrt-Windows.Graphics.Imaging==4!10.0.28000.2705
+winrt-Windows.Storage.Streams==4!10.0.28000.2705
+winrt-Windows.Foundation==4!10.0.28000.2705
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705
+pyinstaller==6.22.3

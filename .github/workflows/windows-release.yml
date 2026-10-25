@@ -1,0 +1,51 @@
+name: Build Windows app
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+          architecture: 'x64'
+      - run: python -m pip install -r requirements.txt
+      - run: python download_models.py
+      - name: Check Python sources
+        run: python -m compileall -q src
+      - name: Try native OCR, speech and overlay test
+        continue-on-error: true
+        run: python src/selftest.py self-test.json
+      - run: python -m PyInstaller --noconfirm MiddenaardeOverlay.spec
+      - name: Add documentation and create portable download
+        shell: pwsh
+        run: |
+          Copy-Item README.md,LICENSE,THIRD_PARTY_NOTICES.md,glossary.json -Destination dist/MiddenaardeOverlay
+          Compress-Archive -Path dist/MiddenaardeOverlay -DestinationPath MiddenaardeOverlay-Windows-x64.zip
+          Get-FileHash MiddenaardeOverlay-Windows-x64.zip -Algorithm SHA256 | Format-List | Out-File SHA256.txt
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: MiddenaardeOverlay-Windows-x64
+          path: |
+            MiddenaardeOverlay-Windows-x64.zip
+            SHA256.txt
+            self-test.json
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/') || startsWith(github.event.head_commit.message, '[release]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0' }}
+        shell: pwsh
+        run: |
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG MiddenaardeOverlay-Windows-x64.zip SHA256.txt --clobber
+          } else {
+            gh release create $env:RELEASE_TAG MiddenaardeOverlay-Windows-x64.zip SHA256.txt --target $env:GITHUB_SHA --title "Middenaarde Overlay $env:RELEASE_TAG" --notes "Portable offline Windows app. Extract the complete ZIP and run MiddenaardeOverlay.exe. See README for English and Dutch instructions. Experimental: OCR and translation can make mistakes."
+          }
