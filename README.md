@@ -2,9 +2,11 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.2.1).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.2.2).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
-**Use version 0.2.1 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixes this and tests the packaged executable before publishing.
+**Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
+
+Version 0.2.2 also accepts case-insensitive Google PCM MIME types and decodes compressed audio returned by Google.
 
 ## Download and run — no Python required
 
@@ -125,7 +127,7 @@ The app is built into `dist/MiddenaardeOverlay/`. Copy `README.md`, `LICENSE`, `
 
 The included **Build Windows app** GitHub Actions workflow builds on Windows and provides a downloadable artifact. It checks Python sources and attempts the native integration check; that native check is non-blocking because hosted runners may lack Windows OCR or a composed desktop. Run the local self-test on your own PC to check those features. Run the workflow under **Actions → Build Windows app → Run workflow**. Pushing a `v*` tag also creates a GitHub Release with the ready-to-run ZIP. The workflow needs repository contents-write permission to publish releases; it does not use any personal access token.
 
-Pushes to `main` also build a downloadable artifact. For publication, a `main` commit whose message starts with `[release]` publishes version `v0.2.1` automatically. For future versions, update the app version and workflow fallback tag, or publish a matching new `v*` tag.
+Pushes to `main` also build a downloadable artifact. For publication, a `main` commit whose message starts with `[release]` publishes version `v0.2.2` automatically. For future versions, update the app version and workflow fallback tag, or publish a matching new `v*` tag.
 
 ## Publish this source as your own public GitHub repository
 
@@ -134,7 +136,7 @@ If this source was provided before a repository could be created:
 1. Sign in to GitHub yourself and create a **public** repository named `middenaarde-overlay`.
 2. Upload this folder's source files, including `src/`, `.github/workflows/`, the build scripts, README, requirements, notices and license. Do **not** upload `lib/`, `model/`, `voice/`, `data/`, generated WAVs or local logs. These are excluded by `.gitignore` for Git users.
 3. On GitHub, open **Actions**, enable workflows if GitHub asks, and run **Build Windows app**. The downloaded workflow artifact contains the app ZIP.
-4. To offer a simple public download under **Releases**, create/push the tag `v0.2.1` (GitHub's **Code → Tags → Create new release** can also create a tag). The tag workflow will build and attach the app ZIP to that release.
+4. To offer a simple public download under **Releases**, create/push the tag `v0.2.2` (GitHub's **Code → Tags → Create new release** can also create a tag). The tag workflow will build and attach the app ZIP to that release.
 
 For a Git/CLI upload, use your normal Git identity and authenticated GitHub CLI:
 
@@ -143,8 +145,8 @@ git init
 git add .gitignore .github src requirements.txt download_models.py MiddenaardeOverlay.spec BUILD.cmd README.md THIRD_PARTY_NOTICES.md LICENSE glossary.json
 git commit -m "Add offline Dutch game overlay"
 gh repo create middenaarde-overlay --public --source . --remote origin --push
-git tag v0.2.1
-git push origin v0.2.1
+git tag v0.2.2
+git push origin v0.2.2
 ```
 
 ## How it works and licensing

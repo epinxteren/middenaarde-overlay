@@ -100,11 +100,17 @@ def synthesize(provider, profile, key, text, resource):
         for candidate in result.get('candidates', []):
             for part in candidate.get('content', {}).get('parts', []):
                 data = part.get('inlineData', {})
-                if data.get('mimeType', '').startswith('audio/') and data.get('data'):
+                if data.get('mimeType', '').lower().startswith('audio/') and data.get('data'):
                     audio = base64.b64decode(data['data'], validate=True)
                     if audio.startswith(b'RIFF'): return audio
-                    mime = data['mimeType']
-                    if 'L16' not in mime and 'pcm' not in mime: raise SpeechError('Onbekend Google-audioformaat.')
+                    mime = data['mimeType'].lower()
+                    if 'l16' not in mime and 'pcm' not in mime:
+                        import miniaudio
+                        try:
+                            decoded = miniaudio.decode(audio, output_format=miniaudio.SampleFormat.SIGNED16, nchannels=1, sample_rate=24000)
+                        except Exception:
+                            raise SpeechError('Google-audioformaat wordt niet ondersteund: '+mime[:100]) from None
+                        return wav_bytes(decoded.samples.tobytes())
                     rate = re.search(r'rate=(\d+)', mime)
                     return wav_bytes(audio, int(rate.group(1)) if rate else 24000)
         raise SpeechError('Google gaf geen audio terug. Probeer een andere tekst of model.')

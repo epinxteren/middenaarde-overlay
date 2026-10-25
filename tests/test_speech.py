@@ -41,6 +41,16 @@ class SpeechTests(unittest.TestCase):
         with wave.open(io.BytesIO(audio)) as stream:
             self.assertEqual(stream.getframerate(),24000); self.assertEqual(stream.getnframes(),240)
 
+    def test_google_lowercase_pcm(self):
+        result = {'candidates': [{'content': {'parts': [{'inlineData': {
+            'mimeType': 'audio/l16;codec=pcm;rate=24000', 'data': base64.b64encode(b'\0'*480).decode()}}]}}]}
+        # No codec parameter: MIME types are case-insensitive.
+        result['candidates'][0]['content']['parts'][0]['inlineData']['mimeType'] = 'audio/l16;rate=24000'
+        with patch('speech.request', return_value=json.dumps(result).encode()):
+            audio = speech.synthesize('google', speech.DEFAULTS['google'], 'key', 'Test', Path('.'))
+        with wave.open(io.BytesIO(audio)) as stream:
+            self.assertEqual(stream.getnframes(), 240)
+
     def test_google_empty_response(self):
         with patch('speech.request', return_value=b'{}'):
             with self.assertRaises(speech.SpeechError): speech.synthesize('google',speech.DEFAULTS['google'],'key','text',Path('.'))
