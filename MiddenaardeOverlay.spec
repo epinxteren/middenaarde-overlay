@@ -7,21 +7,21 @@ root = Path(SPECPATH)
 datas = []
 binaries = []
 hiddenimports = []
-for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper']:
+for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper', 'edge_tts', 'miniaudio', 'certifi']:
     d, b, h = collect_all(package)
     datas += d
     binaries += b
     hiddenimports += h
 datas += collect_data_files('onnxruntime')
 binaries += collect_dynamic_libs('onnxruntime')
-hiddenimports += ['onnxruntime', 'onnxruntime.capi.onnxruntime_pybind11_state', 'selftest', 'qtui']
+hiddenimports += ['onnxruntime', 'onnxruntime.capi.onnxruntime_pybind11_state', 'selftest', 'qtui', 'speech', 'voiceui']
 datas += [(str(root/'model'/'translate-en_nl-1_8'/'model'), 'model/translate-en_nl-1_8/model'),
           (str(root/'model'/'translate-en_nl-1_8'/'sentencepiece.model'), 'model/translate-en_nl-1_8'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx'), 'voice'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx.json'), 'voice')]
 for package in ['piper-tts', 'PySide6-Essentials', 'shiboken6', 'ctranslate2', 'sentencepiece',
                 'onnxruntime', 'numpy', 'Pillow', 'winrt-runtime', 'PyYAML', 'protobuf',
-                'flatbuffers', 'pathvalidate', 'packaging', 'typing_extensions', 'pyinstaller']:
+                'edge-tts', 'miniaudio', 'aiohttp', 'certifi', 'cffi', 'pycparser', 'tabulate', 'aiohappyeyeballs', 'aiosignal', 'attrs', 'frozenlist', 'multidict', 'propcache', 'yarl', 'idna', 'flatbuffers', 'pathvalidate', 'packaging', 'typing_extensions', 'pyinstaller']:
     distribution = importlib.metadata.distribution(package)
     for file in distribution.files or []:
         if '/licenses/' in str(file).replace('\\', '/') or Path(file).name.lower() in ['license', 'license.txt', 'copying']:

@@ -1,4 +1,4 @@
-"""Offline, portable Windows translation overlay. No game assets or network calls."""
+"""Portable Windows translation overlay. OCR and translation run locally."""
 from __future__ import annotations
 
 import asyncio
@@ -19,14 +19,14 @@ import wave
 import winsound
 
 if not getattr(sys, 'frozen', False):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+    sys.path.append(str(Path(__file__).resolve().parents[1] / 'lib'))
 
 from PIL import Image, ImageGrab
 
 RESOURCE = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 HOME = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 DATA = HOME / 'data'
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 user32 = C.WinDLL('user32', use_last_error=True)
 kernel32 = C.WinDLL('kernel32', use_last_error=True)
 try:
@@ -258,58 +258,6 @@ class Recognizer:
             return blocks
         finally:
             bitmap.close()
-
-
-class Speaker:
-    def __init__(self, events):
-        self.events = events
-        self.queue = queue.Queue()
-        self.generation = 0
-        self.closed = False
-        threading.Thread(target=self.run, daemon=True).start()
-
-    def stop(self):
-        self.generation += 1
-        winsound.PlaySound(None, 0)
-
-    def say(self, text):
-        self.stop()
-        self.queue.put((self.generation, text))
-
-    def run(self):
-        try:
-            from piper import PiperVoice, SynthesisConfig
-            self.voice = PiperVoice.load(str(RESOURCE/'voice'/'nl_NL-mls-medium.onnx'))
-            self.config = SynthesisConfig(speaker_id=0, length_scale=1.05)
-        except Exception as exc:
-            logging.exception('Voice initialization')
-            self.events.put(('speech_error', str(exc)))
-            return
-        while not self.closed:
-            try:
-                generation, text = self.queue.get(timeout=0.3)
-            except queue.Empty:
-                continue
-            if generation != self.generation:
-                continue
-            try:
-                for i, chunk in enumerate(re.split(r'(?<=[.!?])\s+', text)):
-                    if generation != self.generation or self.closed:
-                        break
-                    path = DATA/f'speech-{generation % 2}-{i % 2}.wav'
-                    with wave.open(str(path), 'wb') as out:
-                        self.voice.synthesize_wav(chunk, out, syn_config=self.config)
-                    if generation != self.generation or self.closed:
-                        break
-                    with wave.open(str(path), 'rb') as inp:
-                        duration = inp.getnframes()/inp.getframerate()
-                    winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
-                    deadline = time.monotonic()+duration
-                    while generation == self.generation and not self.closed and time.monotonic() < deadline:
-                        time.sleep(0.05)
-            except Exception as exc:
-                logging.exception('Speech')
-                self.events.put(('speech_error', str(exc)))
 
 
 

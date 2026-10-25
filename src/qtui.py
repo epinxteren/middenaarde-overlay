@@ -14,8 +14,12 @@ from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand)
 from PIL import ImageGrab
-from overlay import (DATA, Speaker, Translator, Recognizer, user32, native_handle,
+from overlay import (DATA, Translator, Recognizer, user32, native_handle,
                      find_game, client_box, active_game)
+
+
+from speech import Speaker
+from voiceui import VoiceDialog
 
 
 def place_native(widget, box):
@@ -168,7 +172,7 @@ class App:
         title = QLabel('MIDDEN-AARDE')
         title.setStyleSheet('font: bold 21pt "Segoe UI"; color:#f0d699;')
         layout.addWidget(title)
-        layout.addWidget(QLabel('Nederlandse tekst & stem · volledig offline'))
+        layout.addWidget(QLabel('Lokale vertaling · instelbare Nederlandse stemmen'))
         self.status = QLabel('Taalmodel laden…')
         self.status.setWordWrap(True)
         self.status.setMinimumHeight(42)
@@ -186,6 +190,9 @@ class App:
         self.read_aloud.setChecked(True)
         self.read_aloud.toggled.connect(self.voice_toggle)
         layout.addWidget(self.read_aloud)
+        voice_button = QPushButton('Stem & providers…')
+        voice_button.clicked.connect(self.voice_settings)
+        layout.addWidget(voice_button)
         areas = QHBoxLayout()
         pick = QPushButton('Kies tekstgebied'); pick.clicked.connect(self.select_region)
         areas.addWidget(pick)
@@ -238,6 +245,15 @@ class App:
             self.enabled.set()
             self.start_button.setText('Pauzeer overlay')
             self.status.setText('Actief · klik nu in het spel')
+
+    def voice_settings(self):
+        self.speaker.stop()
+        dialog = VoiceDialog(self.root, self.speaker)
+        self.voice_dialog = dialog
+        if dialog.exec():
+            self.voice_ok = True
+            self.spoken.clear()
+        self.voice_dialog = None
 
     def voice_toggle(self, enabled):
         if not enabled: self.speaker.stop()
@@ -356,7 +372,8 @@ class App:
             elif kind == 'fatal':
                 self.status.setText('Starten mislukt: '+value)
             elif kind == 'speech_error':
-                self.voice_ok = False
+                self.voice_ok = True
+                if getattr(self, "voice_dialog", None): self.voice_dialog.status.setText(value)
                 self.read_aloud.setChecked(False)
                 self.status.setText('Voorlezen niet beschikbaar: '+value[:160])
             elif kind == 'status' and self.enabled.is_set():
@@ -372,7 +389,7 @@ class App:
                 narrative = [b.translated for b in blocks if len(b.text) >= 65]
                 self.latest_text = '\n\n'.join(narrative or [b.translated for b in blocks])
                 self.preview.setPlainText(self.latest_text)
-                self.status.setText(f'Actief · {len(blocks)} tekstvlakken vertaald · offline')
+                self.status.setText(f'Actief · {len(blocks)} tekstvlakken lokaal vertaald')
                 spoken_text = ' '.join(narrative)
                 digest = hashlib.sha256(spoken_text.encode()).hexdigest()
                 if self.read_aloud.isChecked() and self.voice_ok and spoken_text and digest not in self.spoken:

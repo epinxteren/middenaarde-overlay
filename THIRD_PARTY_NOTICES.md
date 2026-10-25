@@ -38,3 +38,10 @@ The standalone build contains dynamically linked libraries with their original n
 | PyInstaller | GPL-2.0-or-later with bootloader exception, https://pyinstaller.org/ |
 
 Additional dependency notices are retained under `_internal/` and `licenses/` in the packaged app. The app source is provided under GPL-3.0-or-later; this does not relicense the separately licensed model weights or runtime components. The Qt libraries are unmodified and dynamically linked so users may replace compatible library builds.
+
+## Optional online narration
+
+- edge-tts (LGPL-3.0), https://github.com/rany2/edge-tts; unofficial Microsoft Edge speech client.
+- miniaudio Python binding (MIT), https://github.com/irmen/pyminiaudio; decodes returned MP3 audio.
+- aiohttp and related dependencies retain their licenses, bundled in `_internal/licenses`.
+- Google Gemini, ElevenLabs and Azure APIs are external services governed by their own account terms. No API keys or provider voices are bundled.

@@ -37,6 +37,12 @@ def run(output):
     with wave.open(str(wav), 'rb') as inp:
         frames, rate = inp.getnframes(), inp.getframerate()
         assert frames > rate
+    import edge_tts
+    import miniaudio
+    from credentials import protect
+    assert protect(protect(b'synthetic-self-test'), decrypt=True) == b'synthetic-self-test'
+    decoded = miniaudio.decode(wav.read_bytes(), output_format=miniaudio.SampleFormat.SIGNED16)
+    assert len(decoded.samples) > 0
     app = QApplication.instance() or QApplication([])
     root = QWidget()
     root.setWindowTitle('Overlay self-test')
@@ -62,10 +68,22 @@ def run(output):
     # Render only this generated widget, not the user's desktop or game screen.
     layer.grab().save(str(Path(output).with_suffix('.png')))
     layer.close()
+    import copy
+    from types import SimpleNamespace
+    from speech import DEFAULTS, PROVIDERS
+    from voiceui import VoiceDialog
+    speaker = SimpleNamespace(settings={'provider': 'piper', 'profiles': copy.deepcopy(DEFAULTS)}, keys={}, stop=lambda: None)
+    dialog = VoiceDialog(root, speaker)
+    for provider in PROVIDERS:
+        dialog.provider.setCurrentIndex(dialog.provider.findData(provider))
+        dialog.capture()
+        assert dialog.settings['provider'] == provider
+    dialog.close()
     root.close()
     result = {'version': overlay.VERSION, 'ocr': [b.text for b in blocks],
               'translation': nl, 'speech_seconds': round(frames/rate, 2),
-              'capture_exclusion': True, 'click_through': True, 'overlay_render': True, 'result': 'PASS'}
+              'capture_exclusion': True, 'click_through': True, 'overlay_render': True,
+              'dpapi': True, 'audio_decode': True, 'voice_dialog': True, 'result': 'PASS'}
     Path(output).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding='utf-8')
     return result
 
