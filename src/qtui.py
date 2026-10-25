@@ -9,10 +9,10 @@ import time
 import asyncio
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter
+from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter, QSettings
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand)
+                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox)
 from PIL import ImageGrab
 from overlay import (DATA, Translator, Recognizer, user32, native_handle,
                      find_game, client_box, active_game)
@@ -39,6 +39,7 @@ class Overlay(QWidget):
         # Qt's per-pixel alpha layer fails SetWindowDisplayAffinity with error 8.
         self.setStyleSheet('background:#ff00ff;')
         self.blocks = []
+        self.progress_text = ''
         self.hwnd = native_handle(self)
         bits = user32.GetWindowLongW(self.hwnd, -20)
         user32.SetWindowLongW(self.hwnd, -20, bits | 0x80000 | 0x20 | 0x08000000)
@@ -77,6 +78,23 @@ class Overlay(QWidget):
             painter.setPen(QColor('#f5e8c7'))
             painter.setFont(font)
             painter.drawText(QRect(x+5, y+3, w-10, draw_h-6), flags, block.translated)
+
+        if self.progress_text:
+            status_width = min(560, physical_width-16)
+            if status_width > 40:
+                status_rect = QRect(physical_width-status_width-8, 8, status_width, 56)
+                painter.setPen(QPen(QColor('#9c8451'), 1))
+                painter.setBrush(QColor('#17212b'))
+                painter.drawRoundedRect(status_rect, 5, 5)
+                font = QFont('Segoe UI'); font.setPixelSize(16)
+                painter.setFont(font); painter.setPen(QColor('#f0d699'))
+                painter.drawText(status_rect.adjusted(10, 4, -10, -4),
+                    int(Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap), self.progress_text)
+
+    def show_progress(self, box, text, clear=False):
+        if clear: self.blocks = []
+        self.progress_text = text
+        self.render_blocks(box, self.blocks)
 
     def render_blocks(self, box, blocks):
         self.blocks = blocks
@@ -146,6 +164,8 @@ class App:
         self.enabled = threading.Event()
         self.epoch = 0
         self.region = None
+        self.preferences = QSettings(str(DATA/'ui.ini'), QSettings.Format.IniFormat)
+        self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
         self.target = None
         self.last_game_box = None
         self.latest_text = ''
@@ -193,6 +213,17 @@ class App:
         voice_button = QPushButton('Stem & providers…')
         voice_button.clicked.connect(self.voice_settings)
         layout.addWidget(voice_button)
+        length_row = QHBoxLayout()
+        length_row.addWidget(QLabel('Vertaal vanaf'))
+        self.minimum_length = QSpinBox()
+        self.minimum_length.setRange(0, 10000)
+        self.minimum_length.setSuffix(' tekens')
+        self.minimum_length.setSpecialValueText('Alles vertalen')
+        self.minimum_length.setValue(self.min_chars)
+        self.minimum_length.setToolTip('Per herkend Engels tekstblok, inclusief spaties. 0 = alles vertalen.')
+        self.minimum_length.valueChanged.connect(self.change_minimum_length)
+        length_row.addWidget(self.minimum_length, 1)
+        layout.addLayout(length_row)
         areas = QHBoxLayout()
         pick = QPushButton('Kies tekstgebied'); pick.clicked.connect(self.select_region)
         areas.addWidget(pick)
@@ -246,6 +277,11 @@ class App:
             self.start_button.setText('Pauzeer overlay')
             self.status.setText('Actief · klik nu in het spel')
 
+    def show_progress(self, text, clear=False):
+        if self.enabled.is_set() and self.target and active_game(self.target):
+            box = client_box(self.target)
+            if box: self.overlay.show_progress(box, text, clear)
+
     def voice_settings(self):
         self.speaker.stop()
         dialog = VoiceDialog(self.root, self.speaker)
@@ -260,6 +296,16 @@ class App:
 
     def repeat(self):
         if self.latest_text: self.speaker.say(self.latest_text)
+
+    def change_minimum_length(self, value):
+        self.min_chars = value
+        self.preferences.setValue('minimum_characters', value)
+        self.preferences.sync()
+        self.epoch += 1
+        self.overlay.hide()
+        self.speaker.stop()
+        self.latest_text = ''
+        self.preview.clear()
 
     def reset_region(self):
         self.region = None
@@ -311,7 +357,7 @@ class App:
                 if not active_game(hwnd):
                     previous = rendered = None
                     continue
-                epoch, region = self.epoch, self.region
+                epoch, region, minimum = self.epoch, self.region, self.min_chars
                 if epoch != previous_epoch:
                     previous = rendered = None
                     previous_epoch = epoch
@@ -325,6 +371,7 @@ class App:
                     grab_box = (x+offset[0], y+offset[1], x+int(width*c), y+int(height*d))
                 image = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 blocks = loop.run_until_complete(recognizer.read(image))
+                blocks = [b for b in blocks if len(b.text.strip()) >= minimum]
                 for block in blocks:
                     block.x += offset[0]; block.y += offset[1]
                 signature = tuple((b.text, round(b.x/8), round(b.y/8), round(b.width/8)) for b in blocks)
@@ -336,7 +383,7 @@ class App:
                     continue
                 if signature == rendered: continue
                 if not blocks:
-                    self.events.put(('status', 'Actief · geen leesbare Engelse tekst gevonden'))
+                    self.events.put(('status', 'Actief · geen tekst gevonden die aan de ingestelde minimumlengte voldoet'))
                     rendered = signature
                     continue
                 self.events.put(('status', 'Nederlandse tekst maken…'))
@@ -346,6 +393,7 @@ class App:
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 fresh = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 fresh_blocks = loop.run_until_complete(recognizer.read(fresh))
+                fresh_blocks = [b for b in fresh_blocks if len(b.text.strip()) >= minimum]
                 if [b.text for b in fresh_blocks] != [b.text for b in blocks]:
                     previous = rendered = None
                     continue
@@ -376,14 +424,21 @@ class App:
                 if getattr(self, "voice_dialog", None): self.voice_dialog.status.setText(value)
                 self.read_aloud.setChecked(False)
                 self.status.setText('Voorlezen niet beschikbaar: '+value[:160])
+                self.show_progress('Voorlezen mislukt: '+value[:140])
+            elif kind == 'speech_status':
+                generation, message = value
+                if generation == self.speaker.generation: self.show_progress(message)
             elif kind == 'status' and self.enabled.is_set():
                 self.status.setText(value)
+                self.show_progress(value)
             elif kind == 'clear' and value == self.epoch:
                 self.overlay.hide()
                 self.speaker.stop()
+                self.show_progress('Tekst herkennen…', clear=True)
             elif kind == 'render':
                 epoch, hwnd, box, blocks, signature = value
                 if epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
+                self.overlay.progress_text = f'Vertaling gereed · {len(blocks)} tekstvlakken'
                 self.overlay.render_blocks(box, blocks)
                 self.last_game_box = box
                 narrative = [b.translated for b in blocks if len(b.text) >= 65]

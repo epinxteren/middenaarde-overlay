@@ -59,6 +59,7 @@ def run(output):
     assert layer.capture_ok
     for block in blocks:
         block.translated = translator.translate(block.text)
+    layer.progress_text = 'Spraak laden…'
     layer.render_blocks((0, 0, 1100, 270), blocks)
     app.processEvents()
     native_box = overlay.client_box(layer.hwnd)

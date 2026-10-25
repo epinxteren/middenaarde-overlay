@@ -203,6 +203,7 @@ class Speaker:
                     digest = hashlib.sha256(json.dumps([provider, profile, chunk], sort_keys=True).encode()).hexdigest()
                     audio = self.cache.get(digest)
                     if audio is None:
+                        self.events.put(('speech_status', (generation, 'Spraak laden…')))
                         audio = synthesize(provider, profile, keys.get(provider, ''), chunk, self.resource)
                         if sum(map(len, self.cache.values()))+len(audio)>40_000_000: self.cache.clear()
                         if len(audio)<=40_000_000: self.cache[digest] = audio
@@ -218,8 +219,11 @@ class Speaker:
                     with self.lock:
                         if generation != self.generation or self.closed: break
                         winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+                    self.events.put(('speech_status', (generation, 'Voorlezen…')))
                     deadline = time.monotonic()+duration
                     while generation == self.generation and not self.closed and time.monotonic()<deadline: time.sleep(.05)
+                if generation == self.generation and not self.closed:
+                    self.events.put(('speech_status', (generation, 'Gereed')))
             except Exception as exc:
                 if generation == self.generation:
                     message = str(exc) if isinstance(exc, SpeechError) else 'Spraak maken mislukt. Controleer provider, stem en verbinding.'
