@@ -8,7 +8,7 @@ if '--self-test' in sys.argv:
     except Exception:
         import traceback
         path.write_text(traceback.format_exc(), encoding='utf-8')
-        raise
+        sys.exit(1)
 else:
     from overlay import main
     main()

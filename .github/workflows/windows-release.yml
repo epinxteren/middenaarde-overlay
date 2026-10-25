@@ -25,6 +25,13 @@ jobs:
         continue-on-error: true
         run: python src/selftest.py self-test.json
       - run: python -m PyInstaller --noconfirm MiddenaardeOverlay.spec
+      - name: Verify bundled speech dependencies
+        shell: pwsh
+        run: |
+          $test = Start-Process dist/MiddenaardeOverlay/MiddenaardeOverlay.exe -ArgumentList '--self-test', "$PWD/bundled-test.json" -PassThru -WindowStyle Hidden
+          if (-not $test.WaitForExit(120000)) { $test.Kill(); throw 'Bundled test timed out' }
+          if ($test.ExitCode -ne 0) { Get-Content bundled-test.json; throw 'Bundled test failed' }
+          Get-Content bundled-test.json
       - name: Add documentation and create portable download
         shell: pwsh
         run: |
@@ -42,7 +49,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || startsWith(github.event.head_commit.message, '[release]')
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.2.0' }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.2.1' }}
         shell: pwsh
         run: |
           gh release view $env:RELEASE_TAG *> $null

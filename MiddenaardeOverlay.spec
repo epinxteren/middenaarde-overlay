@@ -14,7 +14,7 @@ for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper', 'edge_tts', 'm
     hiddenimports += h
 datas += collect_data_files('onnxruntime')
 binaries += collect_dynamic_libs('onnxruntime')
-hiddenimports += ['onnxruntime', 'onnxruntime.capi.onnxruntime_pybind11_state', 'selftest', 'qtui', 'speech', 'voiceui']
+hiddenimports += ['onnxruntime', 'onnxruntime.capi.onnxruntime_pybind11_state', 'selftest', 'qtui', 'speech', 'voiceui', '_cffi_backend']
 datas += [(str(root/'model'/'translate-en_nl-1_8'/'model'), 'model/translate-en_nl-1_8/model'),
           (str(root/'model'/'translate-en_nl-1_8'/'sentencepiece.model'), 'model/translate-en_nl-1_8'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx'), 'voice'),
