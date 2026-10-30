@@ -22,6 +22,7 @@ if not getattr(sys, 'frozen', False):
     sys.path.append(str(Path(__file__).resolve().parents[1] / 'lib'))
 
 from PIL import Image, ImageGrab
+from translation import Translator
 
 RESOURCE = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 HOME = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
@@ -119,6 +120,7 @@ class Block:
     height: float
     line_height: float
     translated: str = ''
+    narrated: str = ''
 
 
 def group_lines(lines):
@@ -165,69 +167,6 @@ def group_lines(lines):
         else:
             blocks.append(row)
     return blocks
-
-
-class Translator:
-    def __init__(self):
-        import ctranslate2
-        import sentencepiece
-        folder = RESOURCE/'model'/'translate-en_nl-1_8'
-        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(folder/'sentencepiece.model'))
-        self.model = ctranslate2.Translator(str(folder/'model'), device='cpu', compute_type='int8',
-                                          inter_threads=1, intra_threads=4)
-        self.path = DATA/'translations.json'
-        try:
-            self.cache = json.loads(self.path.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            self.cache = {}
-        self.glossary = {
-            'Continue': 'Doorgaan', 'Confirm': 'Bevestigen', 'Cancel': 'Annuleren',
-            'New Game': 'Nieuw spel', 'Load Game': 'Spel laden', 'Settings': 'Instellingen',
-            'Collection': 'Collectie', 'Quit': 'Afsluiten', 'Back': 'Terug', 'Next': 'Volgende',
-            'Yes': 'Ja', 'No': 'Nee', 'Main Menu': 'Hoofdmenu', 'End Turn': 'Beurt beëindigen',
-            'Attack': 'Aanvallen', 'Search': 'Doorzoeken', 'Interact': 'Interactie',
-            'Difficulty': 'Moeilijkheid', 'Normal': 'Normaal', 'Hard': 'Moeilijk',
-            'Adventure': 'Avontuur', 'Heroes': 'Helden', 'Campaign': 'Campagne',
-            'Journeys in Middle-earth': 'Reizen door Midden-aarde', 'Options': 'Opties',
-            'Save and Quit': 'Opslaan en afsluiten', 'Inventory': 'Inventaris', 'Map': 'Kaart',
-        }
-        custom = HOME/'glossary.json'
-        if custom.exists():
-            self.glossary.update(json.loads(custom.read_text(encoding='utf-8')))
-
-    def translate(self, text):
-        if text in self.glossary:
-            return self.glossary[text]
-        if text in self.cache:
-            return self.cache[text]
-        # Bound long paragraphs; sentencepiece uses the same boundary marker on target pieces.
-        parts = re.split(r'(?<=[.!?])\s+', text)
-        chunks, current = [], ''
-        for part in parts:
-            if len(current)+len(part) > 650 and current:
-                chunks.append(current)
-                current = ''
-            if len(part) > 650:
-                words = part.split()
-                while words:
-                    chunks.append(' '.join(words[:75]))
-                    words = words[75:]
-            else:
-                current = (current+' '+part).strip()
-        if current:
-            chunks.append(current)
-        tokens = [self.tokenizer.encode(t, out_type=str) for t in chunks]
-        results = self.model.translate_batch(tokens, beam_size=3, max_decoding_length=384)
-        output = ' '.join(''.join(r.hypotheses[0]).replace('▁', ' ').strip() for r in results)
-        output = re.sub(r'\bMiddle[- ]earth\b', 'Midden-aarde', output, flags=re.I)
-        output = re.sub(r'\s+([,.!?;:])', r'\1', output)
-        self.cache[text] = output
-        if len(self.cache) > 15000:
-            self.cache.pop(next(iter(self.cache)))
-        temp = self.path.with_suffix('.tmp')
-        temp.write_text(json.dumps(self.cache, ensure_ascii=False), encoding='utf-8')
-        temp.replace(self.path)
-        return output
 
 
 class Recognizer:

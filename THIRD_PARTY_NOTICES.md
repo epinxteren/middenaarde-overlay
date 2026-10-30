@@ -12,6 +12,18 @@ This companion does not contain Journeys in Middle-earth text, art, sounds or ot
 - Model license, as stated in the package README: **Creative Commons Attribution 4.0 International (CC BY 4.0)**, https://creativecommons.org/licenses/by/4.0/
 - Weights are redistributed unchanged. The app uses a local CTranslate2 inference wrapper and exact-match glossary.
 
+## Optional translation packages
+
+Additional languages download only on request from the official Argos package host (`https://data.argosopentech.com/argospm/v1/`). Exact package versions and SHA-256 checksums are pinned in `src/languagepacks.py`:
+
+- German: `translate-en_de-1_3`
+- French: `translate-en_fr-1_9`
+- Spanish: `translate-en_es-1_0`
+- Italian: `translate-en_it-1_0`
+- Portuguese: `translate-en_pt-1_9`
+
+These weights are used unchanged. Each package's original `README.md` and `metadata.json` are retained in `data/language-models/<package>/`. The French and Portuguese READMEs identify the original OPUS model as CC BY 4.0 and credit Jörg Tiedemann and Santhosh Thottingal, as above. The German README only names the model; the Spanish and Italian READMEs identify their OPUS training corpora without an explicit model-license statement. Consult the [Argos package repository](https://github.com/argosopentech/argospm-index) for upstream package information. The unused Stanza files are not installed. English output uses the original text and requires no model.
+
 ## Dutch voice
 
 - Model: **Piper `nl_NL-mls-medium`**, a Dutch Netherlands multi-speaker model, 52 speakers, 22,050 Hz. The app selects speaker 0.

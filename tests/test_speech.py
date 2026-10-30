@@ -13,12 +13,14 @@ from unittest.mock import patch
 import wave
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'src'))
+import platform_support
 import overlay  # Adds portable local dependencies in development.
 import speech
 from credentials import save_keys, load_keys
 
 
 class SpeechTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'win32', 'Requires real Windows DPAPI')
     def test_dpapi_roundtrip_and_no_plaintext(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/'credentials.dpapi'

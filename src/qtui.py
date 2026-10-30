@@ -12,14 +12,16 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter, QSettings
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox)
+                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox, QComboBox, QScrollArea)
 from PIL import ImageGrab
-from overlay import (DATA, Translator, Recognizer, user32, native_handle,
+from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_handle,
                      find_game, client_box, active_game)
 
 
 from speech import Speaker
 from voiceui import VoiceDialog
+from languages import LANGUAGES, language_code, speech_language
+from languagepacks import model_available, install_language
 
 
 def place_native(widget, box):
@@ -39,6 +41,7 @@ class Overlay(QWidget):
         # Qt's per-pixel alpha layer fails SetWindowDisplayAffinity with error 8.
         self.setStyleSheet('background:#ff00ff;')
         self.blocks = []
+        self.text_visible = True
         self.progress_text = ''
         self.click_handler = None
         self.click_regions = []
@@ -78,7 +81,7 @@ class Overlay(QWidget):
             painter.setPen(QPen(QColor('#9c8451'), 1))
             painter.setBrush(QColor('#211e18'))
             painter.drawRoundedRect(QRect(x, y, w, draw_h), 3, 3)
-            self.click_regions.append((QRect(x, y, w, draw_h), block.translated))
+            self.click_regions.append((QRect(x, y, w, draw_h), block.narrated or block.translated))
             painter.setPen(QColor('#f5e8c7'))
             painter.setFont(font)
             painter.drawText(QRect(x+5, y+3, w-10, draw_h-6), flags, block.translated)
@@ -118,6 +121,10 @@ class Overlay(QWidget):
 
     def render_blocks(self, box, blocks):
         self.blocks = blocks
+        if not self.text_visible:
+            self.click_regions = []
+            self.hide()
+            return
         self.setGeometry(box[0], box[1], box[2]-box[0], box[3]-box[1])
         self.show()
         place_native(self, box)
@@ -186,6 +193,10 @@ class App:
         self.region = None
         self.preferences = QSettings(str(DATA/'ui.ini'), QSettings.Format.IniFormat)
         self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
+        self.output_language = language_code(self.preferences.value('overlay_language', 'nl'))
+        self.narration_choice = self.preferences.value('narration_language', 'same')
+        if self.narration_choice not in LANGUAGES and self.narration_choice != 'same': self.narration_choice = 'same'
+        self.downloading = False
         self.target = None
         self.last_game_box = None
         self.latest_text = ''
@@ -196,7 +207,8 @@ class App:
         self.root = QWidget(None, Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.root.setWindowTitle('Middenaarde Overlay')
         self.root.setMinimumSize(450, 500)
-        self.root.resize(490, 570)
+        available_height = self.qt.primaryScreen().availableGeometry().height()
+        self.root.resize(540, max(500, min(760, available_height - 90)))
         self.root.move(35, 70)
         self.root.setStyleSheet('''
             QWidget { background:#17212b; color:#e7e0cc; font:10pt "Segoe UI"; }
@@ -206,14 +218,22 @@ class App:
             QTextEdit { background:#101820; border:1px solid #3e4850; padding:7px; }
             QCheckBox { padding:4px 0; }
         ''')
-        layout = QVBoxLayout(self.root)
+        window_layout = QVBoxLayout(self.root)
+        window_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        scroll.setWidget(content)
+        window_layout.addWidget(scroll)
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(9)
         title = QLabel('MIDDEN-AARDE')
         title.setStyleSheet('font: bold 21pt "Segoe UI"; color:#f0d699;')
         layout.addWidget(title)
-        layout.addWidget(QLabel('Lokale vertaling · instelbare Nederlandse stemmen'))
-        self.status = QLabel('Taalmodel laden…')
+        layout.addWidget(QLabel('Lokale vertaling · meertalige stemmen'))
+        self.status = QLabel('Tekstherkenning laden…')
         self.status.setWordWrap(True)
         self.status.setMinimumHeight(42)
         layout.addWidget(self.status)
@@ -230,9 +250,34 @@ class App:
         self.read_aloud.setChecked(True)
         self.read_aloud.toggled.connect(self.voice_toggle)
         layout.addWidget(self.read_aloud)
-        voice_button = QPushButton('Stem & providers…')
+        voice_button = QPushButton('Stem && providers…')
         voice_button.clicked.connect(self.voice_settings)
         layout.addWidget(voice_button)
+        language_row = QHBoxLayout()
+        language_row.addWidget(QLabel('Taal overlaytekst'))
+        self.overlay_language = QComboBox()
+        for code, info in LANGUAGES.items(): self.overlay_language.addItem(info[0], code)
+        self.overlay_language.setCurrentIndex(self.overlay_language.findData(self.output_language))
+        language_row.addWidget(self.overlay_language, 1)
+        layout.addLayout(language_row)
+        narration_row = QHBoxLayout()
+        narration_row.addWidget(QLabel('Voorleestaal'))
+        self.narration_language = QComboBox()
+        self.narration_language.addItem('Dezelfde taal als overlaytekst', 'same')
+        for code, info in LANGUAGES.items(): self.narration_language.addItem(info[0], code)
+        self.narration_language.setCurrentIndex(self.narration_language.findData(self.narration_choice))
+        narration_row.addWidget(self.narration_language, 1)
+        layout.addLayout(narration_row)
+        self.language_info = QLabel()
+        self.language_info.setWordWrap(True)
+        layout.addWidget(self.language_info)
+        self.download_button = QPushButton('Download ontbrekende taalpakketten')
+        self.download_button.clicked.connect(self.download_languages)
+        layout.addWidget(self.download_button)
+        self.show_text = QCheckBox('Overlaytekst tonen in het spel')
+        self.show_text.setChecked(self.preferences.value('show_overlay_text', True, type=bool))
+        self.show_text.setToolTip('Uit: de oorspronkelijke speltekst blijft zichtbaar. Vertalen en voorlezen blijven werken.')
+        layout.addWidget(self.show_text)
         length_row = QHBoxLayout()
         length_row.addWidget(QLabel('Vertaal vanaf'))
         self.minimum_length = QSpinBox()
@@ -259,7 +304,8 @@ class App:
         layout.addWidget(QLabel('Laatste vertaling'))
         self.preview = QTextEdit()
         self.preview.setReadOnly(True)
-        self.preview.setPlaceholderText('De Nederlandse verhaaltekst verschijnt hier ook.')
+        self.preview.setMinimumHeight(80)
+        self.preview.setPlaceholderText('De tekst in de gekozen overlaytaal verschijnt hier ook.')
         layout.addWidget(self.preview, 1)
         repeat = QPushButton('Lees laatste tekst opnieuw'); repeat.clicked.connect(self.repeat)
         layout.addWidget(repeat)
@@ -270,7 +316,12 @@ class App:
         self.capture_ok = self.overlay.capture_ok
         user32.SetWindowDisplayAffinity(native_handle(self.root), 0x11)
         self.speaker = Speaker(self.events)
-        self.overlay.set_click_handler(self.click_speech if self.click_to_speak.isChecked() else None)
+        self.overlay.text_visible = self.show_text.isChecked()
+        self.change_click_to_speak(self.click_to_speak.isChecked())
+        self.show_text.toggled.connect(self.change_overlay_visibility)
+        self.overlay_language.currentIndexChanged.connect(self.change_languages)
+        self.narration_language.currentIndexChanged.connect(self.change_languages)
+        self.refresh_language_controls()
         self.hotkeys = []
         self.hotkey_filter = Hotkeys(self)
         self.qt.installNativeEventFilter(self.hotkey_filter)
@@ -286,6 +337,9 @@ class App:
 
     def toggle(self):
         if not self.ready: return
+        if not self.enabled.is_set() and (self.downloading or self.missing_languages()):
+            self.status.setText('Download eerst de ontbrekende taalpakketten.')
+            return
         if not self.capture_ok:
             QMessageBox.critical(self.root, 'Overlay niet beschikbaar',
                 'Windows kan de overlay niet uitsluiten van schermopnames. Gebruik Windows 10 versie 2004 of nieuwer.')
@@ -309,36 +363,111 @@ class App:
 
     def voice_settings(self):
         self.speaker.stop()
-        dialog = VoiceDialog(self.root, self.speaker)
+        dialog = VoiceDialog(self.root, self.speaker, self.current_speech_language())
         self.voice_dialog = dialog
         if dialog.exec():
             self.voice_ok = True
             self.spoken.clear()
+            self.refresh_language_controls()
         self.voice_dialog = None
 
     def voice_toggle(self, enabled):
         if not enabled: self.speaker.stop()
 
     def repeat(self):
-        if self.latest_text: self.speaker.say(self.latest_text)
+        if self.latest_text: self.speaker.say(self.latest_text, language=self.current_speech_language())
 
     def click_speech(self, text):
         if self.speaker.busy and self.speaker.current_text == text:
             self.speaker.stop()
             self.show_progress('')
         else:
-            self.speaker.say(text)
+            self.speaker.say(text, language=self.current_speech_language())
 
     def change_click_to_speak(self, enabled):
         self.preferences.setValue('click_to_speak', enabled)
         self.preferences.sync()
-        self.overlay.set_click_handler(self.click_speech if enabled else None)
+        self.click_to_speak.setEnabled(self.show_text.isChecked())
+        self.overlay.set_click_handler(self.click_speech if enabled and self.show_text.isChecked() else None)
+
+    def current_speech_language(self):
+        return speech_language(self.output_language, self.narration_choice)
+
+    def missing_languages(self):
+        return [code for code in dict.fromkeys((self.output_language, self.current_speech_language()))
+                if not model_available(code, RESOURCE, DATA)]
+
+    def refresh_language_controls(self):
+        missing = self.missing_languages()
+        self.download_button.setVisible(bool(missing) or self.downloading)
+        self.download_button.setEnabled(not self.downloading)
+        self.overlay_language.setEnabled(not self.downloading)
+        self.narration_language.setEnabled(not self.downloading)
+        self.start_button.setEnabled(self.ready and not missing and not self.downloading)
+        if missing:
+            self.language_info.setText('Eenmalige download nodig: ' + ', '.join(LANGUAGES[c][0] for c in missing)
+                + '. Circa 65–150 MB per taal. Daarna werkt vertaling offline. Het spel blijft in het Engels.')
+        else:
+            self.language_info.setText('Vertaling werkt lokaal. Het spel blijft in het Engels.')
+        if self.current_speech_language() != 'nl' and self.speaker.settings['provider'] == 'piper':
+            self.language_info.setText(self.language_info.text() + '\nVoor deze voorleestaal: kies een online stem bij Stem & providers. Piper spreekt alleen Nederlands.')
+
+    def change_languages(self, _index):
+        self.output_language = self.overlay_language.currentData()
+        self.narration_choice = self.narration_language.currentData()
+        self.preferences.setValue('overlay_language', self.output_language)
+        self.preferences.setValue('narration_language', self.narration_choice)
+        self.preferences.sync()
+        self.epoch += 1
+        self.overlay.blocks = []
+        self.overlay.click_regions = []
+        self.overlay.hide()
+        self.speaker.stop()
+        self.latest_text = ''
+        self.preview.clear()
+        self.spoken.clear()
+        if self.missing_languages():
+            self.enabled.clear()
+            self.start_button.setText('Start overlay')
+            self.status.setText('Download de gekozen taalpakketten en start daarna de overlay.')
+        self.refresh_language_controls()
+
+    def download_languages(self):
+        missing = self.missing_languages()
+        if self.downloading or not missing: return
+        self.downloading = True
+        self.status.setText('Taalpakketten downloaden… Dit kan enkele minuten duren.')
+        self.refresh_language_controls()
+        def download():
+            try:
+                for code in missing:
+                    install_language(code, RESOURCE, DATA)
+                self.events.put(('languages_ready', None))
+            except Exception:
+                logging.exception('Language package download')
+                self.events.put(('languages_ready', 'Download mislukt. Controleer internet en vrije schijfruimte en probeer opnieuw.'))
+        threading.Thread(target=download, daemon=True).start()
+
+    def change_overlay_visibility(self, visible):
+        self.preferences.setValue('show_overlay_text', visible)
+        self.preferences.sync()
+        self.overlay.text_visible = visible
+        self.change_click_to_speak(self.click_to_speak.isChecked())
+        if not visible:
+            self.overlay.click_regions = []
+            self.overlay.hide()
+        elif self.enabled.is_set() and self.target and active_game(self.target):
+            box = client_box(self.target)
+            if box and box == self.last_game_box:
+                self.overlay.render_blocks(box, self.overlay.blocks)
 
     def change_minimum_length(self, value):
         self.min_chars = value
         self.preferences.setValue('minimum_characters', value)
         self.preferences.sync()
         self.epoch += 1
+        self.overlay.blocks = []
+        self.overlay.click_regions = []
         self.overlay.hide()
         self.speaker.stop()
         self.latest_text = ''
@@ -347,6 +476,8 @@ class App:
     def reset_region(self):
         self.region = None
         self.epoch += 1
+        self.overlay.blocks = []
+        self.overlay.click_regions = []
         self.overlay.hide()
         self.speaker.stop()
         self.region_label.setText('Gebied: hele spelvenster')
@@ -358,6 +489,8 @@ class App:
                                     'Open Journeys in Middle-earth in venstermodus.')
             return
         self.epoch += 1
+        self.overlay.blocks = []
+        self.overlay.click_regions = []
         self.overlay.hide()
         self.speaker.stop()
         def selected(region):
@@ -371,7 +504,7 @@ class App:
 
     def worker(self):
         try:
-            translator, recognizer = Translator(), Recognizer()
+            translators, recognizer = {}, Recognizer()
             self.events.put(('ready', None))
         except Exception as exc:
             logging.exception('Initialization')
@@ -395,6 +528,7 @@ class App:
                     previous = rendered = None
                     continue
                 epoch, region, minimum = self.epoch, self.region, self.min_chars
+                output_language, narration_language = self.output_language, self.current_speech_language()
                 if epoch != previous_epoch:
                     previous = rendered = None
                     previous_epoch = epoch
@@ -423,10 +557,18 @@ class App:
                     self.events.put(('status', 'Actief · geen tekst gevonden die aan de ingestelde minimumlengte voldoet'))
                     rendered = signature
                     continue
-                self.events.put(('status', 'Nederlandse tekst maken…'))
+                self.events.put(('status', 'Tekst in de gekozen taal maken…'))
+                required = {output_language, narration_language}
+                # Keep at most the two active models in memory.
+                for code in list(translators):
+                    if code not in required: del translators[code]
+                for code in required:
+                    if code not in translators: translators[code] = Translator(code)
                 for block in sorted(blocks, key=lambda b: -len(b.text)):
                     if self.closing.is_set() or epoch != self.epoch: break
-                    block.translated = translator.translate(block.text)
+                    block.translated = translators[output_language].translate(block.text)
+                    block.narrated = (block.translated if narration_language == output_language
+                                      else translators[narration_language].translate(block.text))
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 fresh = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 fresh_blocks = loop.run_until_complete(recognizer.read(fresh))
@@ -453,7 +595,11 @@ class App:
             if kind == 'ready':
                 self.ready = True
                 self.status.setText('Gereed · start de overlay en klik in het spel')
-                self.start_button.setEnabled(True)
+                self.refresh_language_controls()
+            elif kind == 'languages_ready':
+                self.downloading = False
+                self.refresh_language_controls()
+                self.status.setText(value or 'Taalpakketten gereed · start de overlay en klik in het spel')
             elif kind == 'fatal':
                 self.status.setText('Starten mislukt: '+value)
             elif kind == 'speech_error':
@@ -481,15 +627,15 @@ class App:
                 self.overlay.progress_text = ''
                 self.overlay.render_blocks(box, blocks)
                 self.last_game_box = box
-                narrative = [b.translated for b in blocks if len(b.text) >= 65]
-                self.latest_text = '\n\n'.join(narrative or [b.translated for b in blocks])
-                self.preview.setPlainText(self.latest_text)
+                narrative = [b.narrated for b in blocks if len(b.text) >= 65]
+                self.latest_text = '\n\n'.join(narrative or [b.narrated for b in blocks])
+                self.preview.setPlainText('\n\n'.join(b.translated for b in blocks))
                 self.status.setText(f'Actief · {len(blocks)} tekstvlakken lokaal vertaald')
                 spoken_text = ' '.join(narrative)
-                digest = hashlib.sha256(spoken_text.encode()).hexdigest()
+                digest = hashlib.sha256((self.current_speech_language() + ':' + spoken_text).encode()).hexdigest()
                 if self.read_aloud.isChecked() and self.voice_ok and spoken_text and digest not in self.spoken:
                     self.spoken.add(digest)
-                    self.speaker.say(spoken_text)
+                    self.speaker.say(spoken_text, language=self.current_speech_language())
         if self.target:
             box = client_box(self.target)
             if not active_game(self.target) or not box or not self.enabled.is_set():

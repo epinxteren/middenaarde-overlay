@@ -15,6 +15,7 @@ import urllib.parse
 import wave
 import winsound
 from xml.sax.saxutils import escape
+from languages import LANGUAGES, DEFAULT_STYLE, language_code, speech_profile
 
 PROVIDERS = {'piper': 'Piper · offline', 'edge': 'Microsoft Edge · online, zonder sleutel',
              'google': 'Google AI · Gemini', 'eleven': 'ElevenLabs', 'azure': 'Microsoft Azure Speech'}
@@ -26,7 +27,7 @@ VOICES = {
     'azure': ['nl-NL-MaartenNeural', 'nl-NL-FennaNeural', 'nl-NL-ColetteNeural', 'nl-BE-ArnaudNeural', 'nl-BE-DenaNeural'],
 }
 DEFAULTS = {p: {'voice': (v[0] if v else ''), 'speed': 1.0, 'volume': 90,
-    'style': 'Lees in natuurlijk Nederlands, als een warme, meeslepende fantasyverteller.',
+    'style': DEFAULT_STYLE, 'language': 'nl',
     'model': 'gemini-3.1-flash-tts-preview' if p == 'google' else 'eleven_multilingual_v2',
     'region': 'westeurope', 'stability': 0.5, 'similarity': 0.75, 'expressiveness': 0.35}
     for p, v in VOICES.items()}
@@ -63,12 +64,12 @@ def voices(provider, profile, key):
     if provider == 'edge':
         import edge_tts
         async def fetch(): return await asyncio.wait_for(edge_tts.list_voices(), 30)
-        return [(v['FriendlyName'], v['ShortName']) for v in asyncio.run(fetch()) if v['Locale'].startswith('nl-')]
+        return [(v['FriendlyName'], v['ShortName']) for v in asyncio.run(fetch()) if v['Locale'].lower().startswith(language_code(profile.get('language')) + '-')]
     if provider == 'azure':
         region = profile['region']
         if not re.fullmatch('[a-z0-9]+', region): raise SpeechError('Ongeldige Azure-regio.')
         result = json.loads(request(f'https://{region}.tts.speech.microsoft.com/cognitiveservices/voices/list', 'Ocp-Apim-Subscription-Key', key))
-        return [(v['DisplayName'], v['ShortName']) for v in result if v['Locale'].startswith('nl-')]
+        return [(v['DisplayName'], v['ShortName']) for v in result if v['Locale'].lower().startswith(language_code(profile.get('language')) + '-')]
     return [(v, v) for v in VOICES[provider]]
 
 
@@ -80,8 +81,12 @@ def wav_bytes(pcm, rate=24000):
 
 
 def synthesize(provider, profile, key, text, resource):
+    language = language_code(profile.get('language'))
+    profile = speech_profile(provider, profile, language)
     voice, speed = profile['voice'], float(profile['speed'])
     if provider == 'piper':
+        if language != 'nl':
+            raise SpeechError('De meegeleverde Piper-stem spreekt alleen Nederlands. Kies een online provider bij Stem & providers voor deze voorleestaal.')
         from piper import PiperVoice, SynthesisConfig
         # One worker owns this cached model.
         if not hasattr(synthesize, 'piper'):
@@ -93,7 +98,7 @@ def synthesize(provider, profile, key, text, resource):
     if provider == 'google':
         model = profile['model']
         if not re.fullmatch('[a-zA-Z0-9._-]+', model): raise SpeechError('Ongeldige Google-modelnaam.')
-        prompt = f"{profile['style']} Spreek op tempo {speed:.2f} maal normaal. Lees uitsluitend de volgende tekst voor:\n\n{text}"
+        prompt = f"{profile['style']} Read in {LANGUAGES[language][1]}. Speak at {speed:.2f} times normal speed. Read only the following text, without translating it:\n\n{text}"
         payload = {'contents': [{'parts': [{'text': prompt}]}], 'generationConfig': {
             'responseModalities': ['AUDIO'], 'speechConfig': {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': voice}}}}}
         result = json.loads(request(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent', 'x-goog-api-key', key, payload))
@@ -117,13 +122,15 @@ def synthesize(provider, profile, key, text, resource):
     if provider == 'azure':
         region = profile['region']
         if not re.fullmatch('[a-z0-9]+', region): raise SpeechError('Ongeldige Azure-regio.')
-        ssml = f'<speak version="1.0" xml:lang="nl-NL"><voice name="{escape(voice, {chr(34): "&quot;"})}"><prosody rate="{round((speed-1)*100):+d}%">{escape(text)}</prosody></voice></speak>'
+        ssml = f'<speak version="1.0" xml:lang="{LANGUAGES[language][2]}"><voice name="{escape(voice, {chr(34): "&quot;"})}"><prosody rate="{round((speed-1)*100):+d}%">{escape(text)}</prosody></voice></speak>'
         return request(f'https://{region}.tts.speech.microsoft.com/cognitiveservices/v1', 'Ocp-Apim-Subscription-Key', key, ssml.encode(),
                        {'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'riff-24khz-16bit-mono-pcm', 'User-Agent': 'MiddenaardeOverlay'})
     if provider == 'eleven':
         if not voice.strip(): raise SpeechError('Haal je ElevenLabs-stemmen op of vul een Voice ID in.')
         audio = request('https://api.elevenlabs.io/v1/text-to-speech/'+urllib.parse.quote(voice, safe='')+'?output_format=mp3_44100_128',
-                        'xi-api-key', key, {'text': text, 'model_id': profile['model'], 'voice_settings': {
+                        'xi-api-key', key, {'text': text, 'model_id': profile['model'],
+                            **({'language_code': language} if profile['model'] != 'eleven_multilingual_v2' else {}),
+                            'voice_settings': {
                             'stability': profile['stability'], 'similarity_boost': profile['similarity'],
                             'style': profile['expressiveness'], 'speed': speed, 'use_speaker_boost': True}})
     elif provider == 'edge':
@@ -182,11 +189,15 @@ class Speaker:
             winsound.PlaySound(None, 0)
             self.events.put(('speech_status', (self.generation, '')))
 
-    def say(self, text, settings=None, keys=None):
+    def say(self, text, settings=None, keys=None, *, language=None):
         self.stop()
         self.current_text = text
         self.busy = True
-        self.queue.put((self.generation, text, copy.deepcopy(settings or self.settings), dict(self.keys if keys is None else keys)))
+        snapshot = copy.deepcopy(settings or self.settings)
+        provider = snapshot['provider']
+        profile = snapshot['profiles'][provider]
+        snapshot['profiles'][provider] = speech_profile(provider, profile, language or profile.get('language', 'nl'))
+        self.queue.put((self.generation, text, snapshot, dict(self.keys if keys is None else keys)))
 
     def run(self):
         while not self.closed:

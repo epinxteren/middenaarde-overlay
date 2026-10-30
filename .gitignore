@@ -11,6 +11,6 @@ __pycache__/
 *.wav
 self-test.json
 startup-error.txt
-
+.idea
 *.dpapi
 .env

@@ -6,13 +6,17 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QLineEdit, QDoubleSpinBox, QSpinBox, QTextEdit, QPushButton, QDialogButtonBox)
 from speech import PROVIDERS, VOICES, voices
+from languages import LANGUAGES, SAMPLES, speech_profile
 
 
 class VoiceDialog(QDialog):
-    def __init__(self, parent, speaker):
+    def __init__(self, parent, speaker, language="nl"):
+        self.language = language
         super().__init__(parent)
         self.speaker = speaker
         self.settings, self.keys = copy.deepcopy(speaker.settings), dict(speaker.keys)
+        for provider, profile in self.settings['profiles'].items():
+            self.settings['profiles'][provider] = speech_profile(provider, profile, language)
         self.current = self.settings['provider']
         self.results = queue.Queue()
         self.setWindowTitle('Stem & providers')
@@ -37,7 +41,7 @@ class VoiceDialog(QDialog):
         self.stability = QDoubleSpinBox(); self.similarity = QDoubleSpinBox(); self.expressiveness = QDoubleSpinBox()
         for label, widget in [('ElevenLabs stabiliteit', self.stability), ('ElevenLabs stemgelijkenis', self.similarity), ('ElevenLabs expressiviteit', self.expressiveness)]:
             widget.setRange(0,1); widget.setSingleStep(.05); form.addRow(label, widget)
-        self.sample = QTextEdit('De helden trekken door het oude woud. In de verte klinkt een hoorn. Het avontuur in Midden-aarde begint.')
+        self.sample = QTextEdit(SAMPLES[language])
         self.sample.setMaximumHeight(75); layout.addWidget(self.sample)
         row = QHBoxLayout(); layout.addLayout(row)
         preview = QPushButton('Luistervoorbeeld'); preview.clicked.connect(self.preview); row.addWidget(preview)
@@ -63,7 +67,10 @@ class VoiceDialog(QDialog):
     def load(self):
         p = self.settings['profiles'][self.current]
         self.voice.clear()
-        for v in VOICES[self.current]: self.voice.addItem(v, v)
+        options = VOICES[self.current]
+        if self.current in ('edge', 'azure') and self.language != 'nl':
+            options = [LANGUAGES[self.language][3]]
+        for v in options: self.voice.addItem(v, v)
         self.voice.setCurrentText(p['voice'])
         self.model.clear()
         self.model.addItems(['gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts', 'gemini-2.5-pro-preview-tts'] if self.current=='google' else ['eleven_multilingual_v2', 'eleven_flash_v2_5'])
@@ -78,11 +85,11 @@ class VoiceDialog(QDialog):
         for widget in (self.key,self.region,self.model,self.style,self.stability,self.similarity,self.expressiveness):
             self.form.setRowVisible(widget, widget.isEnabled())
         self.info.setText({
-            'piper': 'Volledig lokaal, zonder account. Kies een van de 52 meegeleverde stemmen.',
-            'edge': 'Online zonder API-sleutel, via het onofficiële edge-tts. Nederlandse tekst gaat naar Microsoft. Beschikbaarheid kan veranderen.',
-            'google': 'Nederlandse tekst en vertelstijl gaan naar Google AI. Gebruik een Gemini API-sleutel uit AI Studio. Gratis quota en modeltoegang verschillen per account; daarboven kan gebruik geld kosten.',
-            'eleven': 'Nederlandse tekst gaat naar ElevenLabs. API-sleutel en beschikbare stem nodig. Gebruik verbruikt je accounttegoed. Niet elke stem is beschikbaar met elk abonnement.',
-            'azure': 'Nederlandse tekst gaat naar Microsoft Azure. Vereist een Speech-resource, sleutel en bijbehorende regio. Controleer je gratis quota en tarieven.'}[self.current])
+            'piper': 'Volledig lokaal, zonder account. De 52 meegeleverde stemmen spreken alleen Nederlands. Kies voor andere talen een online provider.',
+            'edge': 'Online zonder API-sleutel, via het onofficiële edge-tts. Voorleestekst gaat naar Microsoft. Beschikbaarheid kan veranderen.',
+            'google': 'Voorleestekst en vertelstijl gaan naar Google AI. Gebruik een Gemini API-sleutel uit AI Studio. Gratis quota en modeltoegang verschillen per account; daarboven kan gebruik geld kosten.',
+            'eleven': 'Voorleestekst gaat naar ElevenLabs. API-sleutel en beschikbare stem nodig. Gebruik verbruikt je accounttegoed. Niet elke stem is beschikbaar met elk abonnement.',
+            'azure': 'Voorleestekst gaat naar Microsoft Azure. Vereist een Speech-resource, sleutel en bijbehorende regio. Controleer je gratis quota en tarieven.'}[self.current] + '\nVoorleestaal: ' + LANGUAGES[self.language][0])
 
     def change(self):
         self.capture(); self.speaker.stop()
@@ -115,7 +122,7 @@ class VoiceDialog(QDialog):
     def preview(self):
         self.capture()
         self.status.setText('Voorbeeld aangevraagd. Online diensten kunnen hiervoor tegoed gebruiken.')
-        self.speaker.say(self.sample.toPlainText(), self.settings, self.keys)
+        self.speaker.say(self.sample.toPlainText(), self.settings, self.keys, language=self.language)
 
     def save(self):
         self.capture()

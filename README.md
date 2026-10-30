@@ -18,7 +18,7 @@ Version 0.2.2 also accepts case-insensitive Google PCM MIME types and decodes co
 6. In the companion app, wait for **Gereed**, click **Start overlay**, then click the game window.
 7. Wait a few seconds on a stable text screen. Dutch text appears in dark, opaque panels over the detected English text. Mouse clicks pass through the panels to the game. Longer text is spoken automatically.
 
-Use the same ZIP and steps on another Windows PC. Both the translation model and Dutch voice are included; after download, the app works offline. The app only targets the `JiME.exe` game window and pauses capture when the game loses focus. Its own overlay is excluded from capture to prevent translation loops. It does not save screenshots. OCR and translation stay local; selecting an online voice sends the Dutch narration text to that provider. Recognized text and translations are cached locally in `data/translations.json` next to the EXE.
+Use the same ZIP and steps on another Windows PC. Both the translation model and Dutch voice are included; after download, the app works offline. The app only targets the `JiME.exe` game window and pauses capture when the game loses focus. Its own overlay is excluded from capture to prevent translation loops. It does not save screenshots. OCR and translation stay local; selecting an online voice sends the narration text in your selected language to that provider. Recognized text and translations are cached locally per language in `data/translations.json` (Dutch) or `data/translations-<language>.json` next to the EXE.
 
 ### Requirements
 
@@ -39,7 +39,10 @@ Version 0.2.3 adds **Vertaal vanaf** (minimum English block length, default 30 c
 | Dutch control | What it does |
 | --- | --- |
 | **Start overlay / Pauzeer overlay** | Start or pause recognition and replacement text |
-| **Verhaaltekst automatisch voorlezen** | Toggle automatic Dutch narration of paragraphs with at least 65 source characters |
+| **Taal overlaytekst** | Choose Dutch, English (original), German, French, Spanish, Italian or Portuguese |
+| **Voorleestaal** | Follow the overlay language or choose a separate narration language |
+| **Overlaytekst tonen in het spel** | Show/hide the replacement panels and status indicator; recognition and narration keep working |
+| **Verhaaltekst automatisch voorlezen** | Toggle automatic narration in the selected language of paragraphs with at least 65 source characters |
 | **Vertaal vanaf** | Skip English OCR blocks shorter than this number of characters (including spaces); default 30, set 0 for all text. Saved across restarts in `data/ui.ini`. Skipped blocks are neither covered nor narrated. |
 | **Stop stem** | Stop the current speech |
 | **Kies tekstgebied** | Drag over one English text area in the game; press Escape to cancel |
@@ -72,7 +75,21 @@ The overlay uses OCR bounding boxes, not the game's internal text widgets. It co
 6. De Nederlandse tekst verschijnt over de Engelse tekst. Langere verhaalteksten worden in het Nederlands voorgelezen. Dit kan enkele seconden duren.
 7. Gebruik **Kies tekstgebied** als je alleen het verhaalvak wilt vervangen. Je kunt door de vertaling heen klikken om het spel te bedienen.
 
-**Ctrl+Alt+P** pauzeert; **Ctrl+Alt+S** stopt de stem. Sluit de app om alle Engelse tekst weer normaal te zien. Vertaling en de standaard Piper-stem werken lokaal. Online stemmen versturen de Nederlandse tekst naar de gekozen dienst. Automatische vertaling en tekstherkenning kunnen fouten maken. Controleer belangrijke spelregels en getallen in de oorspronkelijke tekst.
+**Ctrl+Alt+P** pauzeert; **Ctrl+Alt+S** stopt de stem. Sluit de app om alle Engelse tekst weer normaal te zien. Vertaling en de standaard Piper-stem werken lokaal. Online stemmen versturen de voorleestekst in de gekozen taal naar de gekozen dienst. Automatische vertaling en tekstherkenning kunnen fouten maken. Controleer belangrijke spelregels en getallen in de oorspronkelijke tekst.
+
+## Talen en overlaytekst
+
+Het spel moet in het **Engels** blijven staan. Je kunt de herkende tekst weergeven en laten voorlezen in **Nederlands, Engels, Duits, Frans, Spaans, Italiaans of Portugees**.
+
+1. Kies **Taal overlaytekst** in het hoofdvenster. Engels toont de oorspronkelijke tekst zonder vertaling.
+2. Kies **Voorleestaal**. Standaard volgt deze de overlaytaal, maar je kunt bijvoorbeeld Duitse tekst tonen en Frans laten voorlezen. Beide vertalingen worden rechtstreeks uit het Engels gemaakt.
+3. Verschijnt **Download ontbrekende taalpakketten**, klik hier dan op. Per taal wordt eenmalig ongeveer 65–150 MB gedownload en gecontroleerd. Wacht tot de pakketten gereed zijn en klik daarna op **Start overlay**. Vertaling werkt vervolgens offline. Nederlands is al meegeleverd; Engels heeft geen pakket nodig.
+4. Kies bij **Stem & providers…** een stem en probeer **Luistervoorbeeld**. De meegeleverde **Piper-stem spreekt alleen Nederlands**. Gebruik voor andere talen Edge, Google, ElevenLabs of Azure. Edge/Azure selecteren een stem voor de gekozen taal; via **Haal stemmen op** kun je meer stemmen zoeken. Online stemmen versturen de voorleestekst naar die dienst en kunnen afhankelijk van je account geld kosten. De app kiest nooit automatisch een andere provider.
+5. Zet **Overlaytekst tonen in het spel** uit om de oorspronkelijke speltekst zichtbaar te houden terwijl vertalen en voorlezen doorgaan. Ook de statusindicator en klikvlakken verdwijnen. Het voorbeeld in het hoofdvenster blijft zichtbaar; **Lees laatste tekst opnieuw** gebruikt je voorleestaal. **Pauzeer overlay** pauzeert wel de herkenning en stopt de stem.
+
+Je taalkeuzes en de zichtbaarheid worden bewaard in `data/ui.ini`. Extra taalpakketten staan in `data/language-models/`; vertaalcaches blijven per taal gescheiden. Het woordenboek `glossary.json` blijft voor Nederlands gelden; voor andere talen kun je optioneel `glossary-de.json`, `glossary-fr.json`, `glossary-es.json`, `glossary-it.json` of `glossary-pt.json` toevoegen met Engelse tekst als sleutel. Start de app daarna opnieuw.
+
+Bij een taalwissel stopt de huidige stem en wordt de speltekst opnieuw verwerkt. Een eigen Google-vertelstijl kan nog een taal noemen: pas die zo nodig aan. Twee verschillende uitvoertalen laden maximaal twee vertaalmodellen en vragen meer geheugen dan één taal.
 
 ## Natuurlijkere stemmen / Natural voices
 
@@ -81,10 +98,10 @@ Open **Stem & providers…**, select a provider and voice, and click **Luistervo
 | Provider | Setup | Voice controls |
 | --- | --- | --- |
 | Piper | Included, offline, no account | 52 speaker IDs, tempo, volume |
-| Microsoft Edge | Online, no API key; unofficial edge-tts service | Dutch and Flemish neural voices, tempo, volume |
+| Microsoft Edge | Online, no API key; unofficial edge-tts service | Voices in the selected narration language, tempo, volume |
 | Google AI / Gemini | Create a key in [Google AI Studio](https://aistudio.google.com/apikey) | Voice, editable TTS model, natural-language storytelling style, requested tempo, volume |
 | ElevenLabs | Create a key in [ElevenLabs](https://elevenlabs.io/app/settings/api-keys); allow text-to-speech and voice listing | Fetch account voices or enter Voice ID, model, tempo, stability, similarity, expressiveness, volume |
-| Azure Speech | Create a Speech resource in Azure; enter its key and region | Fetch Dutch/Flemish voices, tempo, volume |
+| Azure Speech | Create a Speech resource in Azure; enter its key and region | Fetch voices in the selected narration language, tempo, volume |
 
 **Nederlands:** Kies bijvoorbeeld **Google AI · Gemini**, vul je API-sleutel in en kies **Charon** of **Orus**. Beschrijf bij **Google-vertelstijl** bijvoorbeeld: “Vertel in natuurlijk Nederlands als een warme, spannende fantasyverteller. Neem rust bij dramatische momenten.” Klik op **Luistervoorbeeld**, daarna **Save**. Bij ElevenLabs haal je eerst je stemmen op; meer expressiviteit en iets minder stabiliteit kunnen de vertelling levendiger maken. De uitkomst verschilt per stem en tekst. Edge is de optie zonder API-sleutel; het is een onofficiële koppeling en kan buiten werking raken.
 
@@ -94,7 +111,7 @@ Google's default is `gemini-3.1-flash-tts-preview`; the model field is editable 
 
 API keys are masked in the dialog and saved using **Windows DPAPI for the current Windows user** at `%LOCALAPPDATA%\MiddenaardeOverlay\credentials.dpapi`. They are not written to source files, ordinary settings, logs or GitHub. This protects stored keys; software running as your Windows account can still access them. Clearing a key field and saving removes that saved key. Enter keys once again on another PC; do not copy the encrypted credentials file between machines.
 
-Voice preferences are saved in `data/voices.json` next to the EXE. On upgrade, close the old app, extract the new ZIP to a new folder and copy `data/voices.json` and optionally `data/translations.json` into its `data` folder. Keys are found automatically through your Windows user profile. Do not mix old and new `_internal` folders.
+Voice preferences are saved in `data/voices.json` next to the EXE. On upgrade, close the old app, extract the new ZIP to a new folder and copy `data/voices.json`, `data/ui.ini` and optionally the `data/translations*.json` files and `data/language-models/` folder into its `data` folder. Keys are found automatically through your Windows user profile. Do not mix old and new `_internal` folders.
 
 The app caches recent synthesized audio in memory (up to 40 MB), so repeating the same text with identical settings during a session normally avoids another request. Playback uses two local WAV files in `data/`; these contain recent spoken text. Stop silences playback immediately, but cannot refund/cancel an online request already sent. Failed requests are not automatically retried. On a provider error, correct settings and use the repeat button or enable automatic narration again.
 
@@ -111,7 +128,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python.exe src\launcher.py
 ```
 
-Setup downloads approximately 71 MB of translation weights and 63 MB of voice weights, plus Python dependencies. The download script verifies SHA-256 hashes. Downloads happen during setup/build only. Optional online speech providers connect only when you request narration or fetch voices.
+Setup downloads approximately 71 MB of translation weights and 63 MB of voice weights, plus Python dependencies. The download script verifies SHA-256 hashes. The bundled Dutch models download during setup/build. Additional translation languages download only when you click **Download ontbrekende taalpakketten**. Optional online speech providers connect only when you request narration or fetch voices.
 
 To run the integration check without starting the game:
 
@@ -157,6 +174,6 @@ git push origin v0.2.2
 
 ## How it works and licensing
 
-Windows OCR → paragraph grouping and stable-page check → local CTranslate2 / OPUS-MT English–Dutch model → transparent, click-through Qt window → selected Piper, Microsoft Edge, Google Gemini, ElevenLabs or Azure narration. A small exact-match glossary and disk cache reduce repeat work. The overlay is a separate app; it is not a game mod and does not bundle the game's copyrighted text, artwork or save files.
+Windows OCR → paragraph grouping and stable-page check → local CTranslate2 / Argos English-to-selected-language model → transparent, click-through Qt window → selected Piper, Microsoft Edge, Google Gemini, ElevenLabs or Azure narration. A small exact-match glossary and disk cache reduce repeat work. The overlay is a separate app; it is not a game mod and does not bundle the game's copyrighted text, artwork or save files.
 
 App source: **GPL-3.0-or-later**. Models and dependencies retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), including attribution to the OPUS-MT authors and Piper/MLS voice dataset. No affiliation with Fantasy Flight Games, Middle-earth Enterprises, Google or Steam.
