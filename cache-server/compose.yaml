@@ -1,0 +1,30 @@
+services:
+  cache:
+    build:
+      context: ..
+      dockerfile: cache-server/Dockerfile
+    restart: unless-stopped
+    environment:
+      UPLOAD_TOKEN: ${UPLOAD_TOKEN:?Set UPLOAD_TOKEN in .env}
+      CACHE_MAX_BYTES: ${CACHE_MAX_BYTES:-5000000000}
+    volumes:
+      - audio:/data
+    mem_limit: 256m
+    cpus: 1
+    pids_limit: 64
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      CACHE_DOMAIN: ${CACHE_DOMAIN:?Set CACHE_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  audio:
+  caddy_data:
+  caddy_config:

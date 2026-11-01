@@ -1,0 +1,6 @@
+{$CACHE_DOMAIN} {
+    request_body {
+        max_size 20MB
+    }
+    reverse_proxy cache:8080
+}

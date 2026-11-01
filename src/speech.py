@@ -172,6 +172,8 @@ class Speaker:
         self.current_text = ''
         self.lock = threading.Lock()
         self.cache = {}
+        from sharedcache import SharedAudioCache
+        self.shared_cache = SharedAudioCache(events)
         threading.Thread(target=self.run, daemon=True).start()
 
     def save(self, settings, keys):
@@ -217,11 +219,15 @@ class Speaker:
                 if current: chunks.append(current)
                 for chunk in chunks:
                     if generation != self.generation or self.closed: break
-                    digest = hashlib.sha256(json.dumps([provider, profile, chunk], sort_keys=True).encode()).hexdigest()
+                    from sharedcache import audio_key
+                    digest = audio_key(provider, profile, chunk)
                     audio = self.cache.get(digest)
                     if audio is None:
                         self.events.put(('speech_status', (generation, 'Spraak laden…')))
-                        audio = synthesize(provider, profile, keys.get(provider, ''), chunk, self.resource)
+                        audio = self.shared_cache.get(digest)
+                        if audio is None:
+                            audio = synthesize(provider, profile, keys.get(provider, ''), chunk, self.resource)
+                            self.shared_cache.put(digest, audio)
                         if sum(map(len, self.cache.values()))+len(audio)>40_000_000: self.cache.clear()
                         if len(audio)<=40_000_000: self.cache[digest] = audio
                     with wave.open(io.BytesIO(audio), 'rb') as source:

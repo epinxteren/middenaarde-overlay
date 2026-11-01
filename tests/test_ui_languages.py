@@ -114,6 +114,16 @@ class UiLanguageTests(unittest.TestCase):
         with patch('qtui.active_game', return_value=True): self.app.poll()
         self.assertFalse(self.app.overlay.isVisible())
 
+    def test_gemini_settings_are_inline_only_for_gemini(self):
+        self.assertTrue(self.app.google_panel.isHidden())
+        self.app.ocr_choice.setCurrentIndex(self.app.ocr_choice.findData('gemini'))
+        self.assertFalse(self.app.google_panel.isHidden())
+        self.assertIsNone(self.app.qt.activeModalWidget())
+        self.app.ocr_choice.setCurrentIndex(self.app.ocr_choice.findData('portable'))
+        self.assertTrue(self.app.google_panel.isHidden())
+        self.assertTrue(self.app.cache_enabled.isChecked())
+        self.assertEqual(self.app.cache_url.text(), '')
+
     def test_missing_model_pauses_and_requires_explicit_download(self):
         self.app.enabled.set()
         with patch('qtui.model_available', side_effect=lambda lang, *_: lang != 'de'), \

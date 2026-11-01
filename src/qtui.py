@@ -262,7 +262,7 @@ class App:
         self.tabs = QTabWidget()
         window_layout.addWidget(self.tabs, 1)
         pages = {}
-        for name in ('Overzicht', 'Tekstherkenning', 'Talen & stem', 'Kindvriendelijk', 'Debuglogs'):
+        for name in ('Overzicht', 'Tekstherkenning', 'Talen & stem', 'Kindvriendelijk', 'Audiocache', 'Debuglogs'):
             scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
             page = QWidget(); section = QVBoxLayout(page)
             section.setContentsMargins(18, 14, 18, 14); section.setSpacing(10)
@@ -290,9 +290,9 @@ class App:
         self.ocr_label = QLabel('OCR laden…')
         self.ocr_label.setWordWrap(True)
         layout.addWidget(self.ocr_label)
-        ocr_settings = QPushButton('Gemini OCR-instellingen…')
-        ocr_settings.clicked.connect(self.google_ocr_settings)
-        layout.addWidget(ocr_settings)
+        self.google_panel = QWidget()
+        self.google_panel.setVisible(self.ocr_provider == 'gemini')
+        layout.addWidget(self.google_panel)
         layout = pages['Talen & stem']
         language_row = QHBoxLayout()
         language_row.addWidget(QLabel('Taal overlaytekst'))
@@ -390,6 +390,8 @@ class App:
         self.capture_ok = self.overlay.capture_ok
         user32.SetWindowDisplayAffinity(native_handle(self.root), 0x11)
         self.speaker = Speaker(self.events)
+        self.build_google_ocr_settings()
+        self.build_cache_settings(pages['Audiocache'])
         self.overlay.text_visible = self.show_text.isChecked()
         self.change_click_to_speak(self.click_to_speak.isChecked())
         self.show_text.toggled.connect(self.change_overlay_visibility)
@@ -509,8 +511,48 @@ class App:
             self.invalidate_page(); dialog.accept()
         buttons.accepted.connect(save); dialog.exec()
 
-    def google_ocr_settings(self):
-        dialog = QDialog(self.root); dialog.setWindowTitle('Gemini OCR-instellingen')
+    def build_cache_settings(self, layout):
+        from sharedcache import server_url
+        self.cache_enabled = QCheckBox('Gedeelde audiocache gebruiken en bijdragen')
+        self.cache_enabled.setChecked(self.preferences.value('shared_audio_enabled', True, type=bool))
+        layout.addWidget(self.cache_enabled)
+        notice = QLabel('Opnamen worden openbaar gedeeld op jouw server. Dezelfde tekst, provider, stem, model, taal en steminstellingen gebruiken dezelfde opname. Geen screenshots of API-sleutels worden meegestuurd. Zonder serveradres blijft voorlezen normaal werken.')
+        notice.setWordWrap(True); layout.addWidget(notice)
+        layout.addWidget(QLabel('HTTPS-serveradres'))
+        self.cache_url = QLineEdit(self.preferences.value('shared_audio_url', '', type=str))
+        self.cache_url.setPlaceholderText('https://cache.example.com'); layout.addWidget(self.cache_url)
+        layout.addWidget(QLabel('Uploadsleutel (zonder sleutel: alleen downloaden)'))
+        self.cache_token = QLineEdit(self.speaker.keys.get('audio_cache', ''))
+        self.cache_token.setEchoMode(QLineEdit.EchoMode.Password); layout.addWidget(self.cache_token)
+        self.cache_info = QLabel(); self.cache_info.setWordWrap(True); layout.addWidget(self.cache_info)
+        def configure():
+            self.speaker.shared_cache.configure(self.cache_enabled.isChecked(), self.cache_url.text(), self.cache_token.text())
+            self.cache_info.setText('Uitgeschakeld.' if not self.cache_enabled.isChecked() else
+                ('Geen server ingesteld; er worden geen opnamen gedeeld.' if not self.cache_url.text().strip() else
+                 'Ingeschakeld: downloaden en automatisch uploaden.' if self.cache_token.text().strip() else 'Ingeschakeld: alleen downloaden.'))
+        def save():
+            try:
+                url = server_url(self.cache_url.text())
+                keys = dict(self.speaker.keys); keys['audio_cache'] = self.cache_token.text().strip()
+                self.speaker.save(self.speaker.settings, keys)
+                self.preferences.setValue('shared_audio_url', url)
+                self.preferences.setValue('shared_audio_enabled', self.cache_enabled.isChecked())
+                self.preferences.sync(); configure()
+            except (OSError, ValueError) as exc:
+                self.cache_info.setText('Instellingen niet opgeslagen: '+str(exc))
+        def toggle(enabled):
+            self.preferences.setValue('shared_audio_enabled', enabled); self.preferences.sync()
+            # Only apply saved settings; do not save unfinished address/token edits.
+            self.speaker.shared_cache.configure(enabled, self.preferences.value('shared_audio_url', '', type=str), self.speaker.keys.get('audio_cache', ''))
+            self.cache_info.setText('Ingeschakeld met opgeslagen instellingen.' if enabled else 'Uitgeschakeld.')
+        button = QPushButton('Cache-instellingen opslaan'); button.clicked.connect(save); layout.addWidget(button)
+        self.cache_enabled.toggled.connect(toggle)
+        try: configure()
+        except ValueError: self.cache_info.setText('Ongeldig serveradres; pas het aan en sla opnieuw op.')
+        layout.addStretch()
+
+    def build_google_ocr_settings(self):
+        dialog = self.google_panel
         layout = QFormLayout(dialog)
         notice = QLabel('Alleen bij Google Gemini: het gekozen spelbeeldgebied gaat naar Google.\nDit gebruikt API-tegoed. Deze sleutel wordt ook voor Gemini-spraak gebruikt.')
         notice.setWordWrap(True); layout.addRow(notice)
@@ -523,8 +565,9 @@ class App:
         model.setCurrentText(self.ocr_model); layout.addRow('Beeldmodel (geen TTS-model)', model)
         interval = QSpinBox(); interval.setRange(5, 120); interval.setValue(self.ocr_interval); interval.setSuffix(' seconden')
         layout.addRow('Minimale tijd tussen aanvragen', interval)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        layout.addRow(buttons); buttons.rejected.connect(dialog.reject)
+        buttons = QPushButton('Gemini-instellingen opslaan')
+        saved = QLabel(); saved.setWordWrap(True)
+        layout.addRow(buttons); layout.addRow(saved)
         def save():
             keys = dict(self.speaker.keys); keys['google'] = key.text().strip()
             try: self.speaker.save(self.speaker.settings, keys)
@@ -534,8 +577,9 @@ class App:
             self.preferences.setValue('ocr_model', self.ocr_model)
             self.preferences.setValue('ocr_interval', self.ocr_interval)
             self.preferences.sync(); self.ocr_revision += 1; self.epoch += 1
-            self.overlay.hide(); dialog.accept()
-        buttons.accepted.connect(save); dialog.exec()
+            self.overlay.hide(); saved.setText('Gemini-instellingen opgeslagen.')
+        buttons.clicked.connect(save)
+        self.google_key_input = key
 
     def create_recognizer(self, provider):
         options = {}
@@ -548,6 +592,8 @@ class App:
 
     def change_ocr(self):
         self.ocr_provider = self.ocr_choice.currentData()
+        self.google_panel.setVisible(self.ocr_provider == 'gemini')
+        if self.ocr_provider == 'gemini': self.google_key_input.setText(self.speaker.keys.get('google', ''))
         self.preferences.setValue('ocr_provider', self.ocr_provider)
         self.preferences.sync()
         self.epoch += 1

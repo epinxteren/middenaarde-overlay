@@ -1,0 +1,6 @@
+**
+!src/
+!src/sharedcache.py
+!cache-server/
+!cache-server/server.py
+!cache-server/Dockerfile

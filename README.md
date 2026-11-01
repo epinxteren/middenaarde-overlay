@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.3.5).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.3.6).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -212,6 +212,15 @@ Je kunt de standaardinstructie herstellen. **Pauzeren als kindvriendelijk maken 
 
 ### Schermen en debuglogs
 
-De instellingen staan in vijf tabbladen: **Overzicht**, **Tekstherkenning**, **Talen & stem**, **Kindvriendelijk** en **Debuglogs**. Start de overlay en zet het spel op de voorgrond. Alleen een actief spelvenster wordt vertaald. De status meldt wanneer het spel ontbreekt, geminimaliseerd is of geen focus heeft.
+De instellingen staan in zes tabbladen: **Overzicht**, **Tekstherkenning**, **Talen & stem**, **Kindvriendelijk**, **Audiocache** en **Debuglogs**. Start de overlay en zet het spel op de voorgrond. Alleen een actief spelvenster wordt vertaald. De status meldt wanneer het spel ontbreekt, geminimaliseerd is of geen focus heeft.
 
 Bij **Debuglogs** zie je de verwerkingsstappen, OCR-tijden, aantallen gevonden tekstblokken en het ingestelde minimum. Je kunt de zichtbare logs kopiëren of de logmap openen. Het bestand `data/overlay.log` rouleert met maximaal twee reservebestanden van circa 2 MB. De diagnoseberichten bevatten geen API-sleutels of verhaaltekst. Tijdens herkennen en vertalen toont de overlay een subtiele wachtmelding; een volledige OCR-scan kan op oudere hardware enkele seconden duren.
+
+
+### Gedeelde audiocache op je eigen server
+
+Open **Audiocache**. Delen en hergebruiken staat standaard aan, maar er gebeurt niets online zolang je geen serveradres invult. Voer na uitrol je HTTPS-adres en aparte uploadsleutel in. Bestaande audio wordt hergebruikt per tekst, provider, stem, model, taal en synthese-instellingen. Nieuwe audio wordt op de achtergrond gedeeld. De inhoud van deze opnamen is openbaar; screenshots en provider-API-sleutels gaan niet naar de cache-server. Je kunt de gedeelde cache met één vinkje uitschakelen.
+
+Docker Compose, HTTPS-configuratie en alle stappen staan in [cache-server/README.md](cache-server/README.md). Jij rolt dit op je eigen server uit; er is geen centrale dienst vooraf ingesteld. Zonder uploadsleutel kun je alleen downloaden.
+
+De Gemini OCR-instellingen staan voortaan direct op **Tekstherkenning**, zodra je **Google Gemini** selecteert. Klik daar op **Gemini-instellingen opslaan** na wijzigingen.
