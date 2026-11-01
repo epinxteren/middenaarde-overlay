@@ -122,7 +122,7 @@ class UiLanguageTests(unittest.TestCase):
 
 
 class WorkerLanguageTests(unittest.TestCase):
-    def test_worker_translates_overlay_and_narration_independently(self, child=False):
+    def test_worker_translates_overlay_and_narration_independently(self, child=False, failure=False, pause=True):
         class StopAfterThreeScans:
             count = 0
             def is_set(self): return False
@@ -143,6 +143,7 @@ class WorkerLanguageTests(unittest.TestCase):
         app.output_language, app.narration_choice = 'de', 'fr'
         app.ocr_provider, app.ocr_revision = 'portable', 0
         app.child_friendly, app.child_instruction = child, 'Verzacht de tekst'
+        app.child_pause = pause
         app.speaker = MagicMock(); app.speaker.keys = {'google': 'test'}
         app.ocr_model = 'test-model'
         app.create_recognizer = lambda provider: Recognizer()
@@ -154,18 +155,29 @@ class WorkerLanguageTests(unittest.TestCase):
                 patch('qtui.find_game', return_value=1), patch('qtui.client_box', return_value=(0, 0, 800, 600)), \
                 patch('qtui.active_game', return_value=True), patch('qtui.ImageGrab.grab'), \
                 patch('qtui.ChildFriendlyRewriter') as rewrite:
-            rewrite.return_value.rewrite.side_effect = lambda texts: ['Zacht: '+t for t in texts]
+            rewrite.return_value.rewrite.side_effect = (qtui.ChildFriendlyError('Testfout') if failure else lambda texts: ['Zacht: '+t for t in texts])
             app.worker()
         events = list(app.events.queue)
         renders = [value for kind, value in events if kind == 'render']
+        if failure and pause:
+            self.assertEqual(renders, [])
+            self.assertFalse(app.enabled.is_set())
+            self.assertTrue(any(kind == 'ocr_failed' for kind, _ in events))
+            return
         self.assertEqual(len(renders), 1)
         block = renders[0][3][0]
-        self.assertEqual(block.translated, ('Zacht: ' if child else '') + 'de: ' + block.text)
-        self.assertEqual(block.narrated, ('Zacht: ' if child else '') + 'fr: ' + block.text)
+        self.assertEqual(block.translated, ('Zacht: ' if child and not failure else '') + 'de: ' + block.text)
+        self.assertEqual(block.narrated, ('Zacht: ' if child and not failure else '') + 'fr: ' + block.text)
         self.assertEqual({call.args[0] for call in models.call_args_list}, {'de', 'fr'})
         self.assertEqual(models.call_count, 2)
 
     def test_worker_softens_both_languages_before_rendering(self):
         self.test_worker_translates_overlay_and_narration_independently(child=True)
+
+    def test_rewrite_failure_can_continue_with_normal_translation(self):
+        self.test_worker_translates_overlay_and_narration_independently(child=True, failure=True, pause=False)
+
+    def test_rewrite_failure_pauses_when_selected(self):
+        self.test_worker_translates_overlay_and_narration_independently(child=True, failure=True, pause=True)
 
 if __name__ == '__main__': unittest.main()

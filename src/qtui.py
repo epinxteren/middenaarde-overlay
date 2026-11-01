@@ -22,7 +22,7 @@ from speech import Speaker
 from voiceui import VoiceDialog
 from gemini_ocr import OCRError
 from keyhelp import show_key_help
-from childfriendly import ChildFriendlyRewriter, DEFAULT_INSTRUCTION
+from childfriendly import ChildFriendlyRewriter, ChildFriendlyError, DEFAULT_INSTRUCTION
 from languages import LANGUAGES, language_code, speech_language
 from languagepacks import model_available, install_language
 
@@ -201,6 +201,7 @@ class App:
         self.ocr_interval = self.preferences.value('ocr_interval', 10, type=int)
         self.ocr_revision = 0
         self.child_friendly = self.preferences.value('child_friendly', False, type=bool)
+        self.child_pause = self.preferences.value('child_pause_on_error', True, type=bool)
         self.child_instruction = self.preferences.value('child_instruction', DEFAULT_INSTRUCTION, type=str)
         self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
         self.output_language = language_code(self.preferences.value('overlay_language', 'nl'))
@@ -309,6 +310,11 @@ class App:
         self.child_friendly_box.setToolTip('Optioneel: vertaald verhaal verzachten via Google. Gebruikt API-tegoed, ook bij lokale OCR.')
         self.child_friendly_box.toggled.connect(self.change_child_friendly)
         layout.addWidget(self.child_friendly_box)
+        self.child_pause_box = QCheckBox('Pauzeren als kindvriendelijk maken mislukt')
+        self.child_pause_box.setChecked(self.child_pause)
+        self.child_pause_box.setToolTip('Uit: bij een fout wordt de gewone vertaling getoond en voorgelezen, zonder kindvriendelijke bewerking.')
+        self.child_pause_box.toggled.connect(self.change_child_pause)
+        layout.addWidget(self.child_pause_box)
         child_settings = QPushButton('Instructie kindvriendelijke tekst…')
         child_settings.clicked.connect(self.child_friendly_settings)
         layout.addWidget(child_settings)
@@ -420,6 +426,12 @@ class App:
         self.speaker.stop()
         self.latest_text = ''
         self.preview.clear()
+
+    def change_child_pause(self, enabled):
+        self.child_pause = enabled
+        self.preferences.setValue('child_pause_on_error', enabled)
+        self.preferences.sync()
+        self.invalidate_page()
 
     def change_child_friendly(self, enabled):
         self.child_friendly = enabled
@@ -669,6 +681,7 @@ class App:
                     continue
                 epoch, region, minimum = self.epoch, self.region, self.min_chars
                 child_enabled, child_instruction = self.child_friendly, self.child_instruction
+                child_pause = self.child_pause
                 output_language, narration_language = self.output_language, self.current_speech_language()
                 if epoch != previous_epoch:
                     previous = rendered = None
@@ -717,9 +730,14 @@ class App:
                     settings = (self.speaker.keys.get('google', ''), self.ocr_model, child_instruction)
                     if settings != rewrite_settings:
                         rewriter = ChildFriendlyRewriter(*settings); rewrite_settings = settings
-                    rewritten = rewriter.rewrite([text for block in blocks for text in (block.translated, block.narrated)])
-                    for i, block in enumerate(blocks):
-                        block.translated, block.narrated = rewritten[2*i:2*i+2]
+                    try:
+                        rewritten = rewriter.rewrite([text for block in blocks for text in (block.translated, block.narrated)])
+                    except ChildFriendlyError:
+                        if child_pause: raise
+                        self.events.put(('status', 'Kindvriendelijke bewerking mislukt; gewone vertaling gebruiken.'))
+                    else:
+                        for i, block in enumerate(blocks):
+                            block.translated, block.narrated = rewritten[2*i:2*i+2]
                     if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 fresh = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 if selected_ocr == 'gemini':
