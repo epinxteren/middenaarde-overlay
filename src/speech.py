@@ -175,7 +175,14 @@ class Speaker:
         self.cache = {}
         from sharedcache import SharedAudioCache
         self.shared_cache = SharedAudioCache(events)
-        threading.Thread(target=self.run, daemon=True).start()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        self.closed = True
+        self.stop()
+        # Allow the playback worker to restore the game's volume before process exit.
+        self.thread.join(timeout=1)
 
     def save(self, settings, keys):
         self.stop()

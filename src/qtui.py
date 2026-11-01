@@ -1227,8 +1227,7 @@ class App:
 
     def close_event(self, event):
         self.enabled.clear(); self.epoch += 1; self.closing.set()
-        self.speaker.closed = True
-        self.speaker.stop()
+        self.speaker.close()
         for code in self.hotkeys:
             user32.UnregisterHotKey(native_handle(self.root), code)
         self.overlay.close()
