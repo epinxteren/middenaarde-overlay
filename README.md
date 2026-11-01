@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.4.3).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.4.4).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -258,6 +258,12 @@ Op **Informatie** staan alle stappen, met uitleg over lokale detectie, OCR, loka
 **Vertalingen automatisch verbeteren met Gemini vóór tonen en voorlezen** is een aparte schakelaar op Vertaalhulp. Gemini controleert het originele Engels, de lokale vertaling en de bordspelcontext op onnatuurlijk taalgebruik, verkeerde uitdrukkingen en achtergebleven Engelse woorden. De verbeterde tekst gaat naar zowel overlay als spraak. De kindvriendelijke bewerking volgt daarna, indien ingeschakeld. Bij een AI-fout pauzeert de verwerking met een melding. Deze aanvragen gebruiken extra API-tegoed, buiten de OCR-teller.
 
 ### Blijvende lokale caches
+
+Op **Detectie** stel je de overeenkomst voor hergebruik in (standaard 98%, bereik 95–100%). Bekende tekstvakken worden vergeleken op lettervormen in plaats van een exact volledig screenshot. Achtergrondanimatie, helderheid en maximaal twee pixels verschuiving hoeven geen nieuwe OCR-aanvraag te veroorzaken. Begin/einde, de hele tekst en individuele lettervormen worden gecontroleerd. Bij onvoldoende zekerheid wordt opnieuw OCR gebruikt; lage percentages verhogen de kans op onjuist hergebruik.
+
+Kleine OCR-afwijkingen in langere bekende passages kunnen aan opgeslagen tekst worden gekoppeld. Getallen, ontkenningen en belangrijke opdracht-/richtingswoorden mogen daarbij niet veranderen. Oude beeldcachebestanden bevatten nog geen letterafdrukken: die ontstaan de eerstvolgende keer dat de pagina wordt herkend. Een cachehit toont geen nieuwe melding ‘Tekst herkennen’.
+
+Lokale tekstblokken worden met maximaal twee workers parallel vertaald. Gemini krijgt alle blokken van de pagina samen in één contextaanvraag; er worden geen dubbele API-aanvragen per blok gestart. Spraak werkt op een aparte achtergrondthread. Deze indeling voorkomt onnodig API-verbruik.
 
 De Windows-app bewaart caches in `%LOCALAPPDATA%\MiddenaardeOverlay\cache`, onafhankelijk van de installatiemap. Daardoor blijven ze beschikbaar na app-/pc-herstart en bij een volgende appversie. Bestaande lokale vertaalbestanden worden overgenomen wanneer er nog geen centrale vertaalcache bestaat.
 

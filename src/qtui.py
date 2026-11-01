@@ -11,6 +11,7 @@ import queue
 import threading
 import time
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter, QSettings
@@ -216,6 +217,7 @@ class App:
         self.ocr_revision = 0
         self.detect_enabled = self.preferences.value('detect_text_first', True, type=bool)
         self.detect_minimum = self.preferences.value('detect_minimum_lines', 3, type=int)
+        self.cache_similarity = self.preferences.value('cache_similarity', 98, type=int)
         self.child_friendly = self.preferences.value('child_friendly', False, type=bool)
         self.auto_review = self.preferences.value('auto_review', False, type=bool)
         self.auto_review_model = self.preferences.value('auto_review_model', 'gemini-3.5-flash-lite')
@@ -653,6 +655,14 @@ class App:
         self.review_chat.appendPlainText('Toegepast op overlay en voorleestekst; correcties opgeslagen voor hergebruik.')
 
     def build_detection_settings(self, layout):
+        cache_row = QHBoxLayout()
+        cache_row.addWidget(QLabel('Overeenkomst voor hergebruik van bekende tekst'))
+        self.cache_similarity_control = QSpinBox(); self.cache_similarity_control.setRange(95,100)
+        self.cache_similarity_control.setSuffix(' %'); self.cache_similarity_control.setValue(self.cache_similarity)
+        cache_row.addWidget(self.cache_similarity_control); layout.addLayout(cache_row)
+        cache_help = QLabel('Vergelijkt lettervormen in tekstvakken, met begin/einde als controle. Kleine OCR-afwijkingen mogen overeenkomen; getallen en belangrijke opdrachtwoorden moeten gelijk blijven. Lager is toleranter, maar vergroot de kans op onjuist hergebruik.')
+        cache_help.setWordWrap(True); layout.addWidget(cache_help)
+        self.cache_similarity_control.valueChanged.connect(self.change_cache_similarity)
         title = QLabel('Eerst lokaal controleren of er genoeg tekst staat')
         title.setWordWrap(True); layout.addWidget(title)
         self.detect_box = QCheckBox('Snelle tekstdetectie vóór OCR inschakelen')
@@ -675,6 +685,12 @@ class App:
         self.preferences.setValue('detect_text_first', self.detect_enabled)
         self.preferences.setValue('detect_minimum_lines', self.detect_minimum)
         self.preferences.sync(); self.invalidate_page()
+
+    def change_cache_similarity(self, value):
+        self.cache_similarity=value
+        self.preferences.setValue('cache_similarity',value); self.preferences.sync()
+        self.ocr_revision+=1
+        self.invalidate_page()
 
     def build_information(self, layout):
         text = QTextEdit(); text.setReadOnly(True)
@@ -818,7 +834,7 @@ class App:
                 cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
         from localcache import CachedRecognizer, cache_directory
         return CachedRecognizer(Recognizer(provider, **options), cache_directory(DATA)/'ocr-cache',
-                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop])
+                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop], self.cache_similarity/100)
 
     def change_ocr(self):
         self.ocr_provider = self.ocr_choice.currentData()
@@ -1069,10 +1085,14 @@ class App:
                     if identical or unchanged_text:
                         self.trace('Tekst ongewijzigd: bestaande vertaling hergebruikt, geen OCR-aanvraag')
                         continue
-                self.trace(f'OCR starten: {selected_ocr}, gebied {grab_box[2]-grab_box[0]}x{grab_box[3]-grab_box[1]}')
-                self.events.put(('ocr_wait', epoch))
                 started = time.monotonic()
-                blocks = loop.run_until_complete(recognizer.read(image))
+                blocks = recognizer.lookup(image) if hasattr(recognizer, 'lookup') else None
+                if blocks is None:
+                    self.trace(f'OCR starten: {selected_ocr}, gebied {grab_box[2]-grab_box[0]}x{grab_box[3]-grab_box[1]}')
+                    self.events.put(('ocr_wait', epoch))
+                    blocks = loop.run_until_complete(recognizer.read(image))
+                else:
+                    self.trace('Bekende pagina uit lokale cache: OCR overgeslagen')
                 if selected_ocr == 'gemini': self.events.put(('ocr_wait_done', epoch))
                 count = len(blocks)
                 blocks = [b for b in blocks if len(b.text.strip()) >= minimum]
@@ -1110,11 +1130,20 @@ class App:
                     if code not in required: del translators[code]
                 for code in required:
                     if code not in translators: translators[code] = Translator(code)
-                for block in sorted(blocks, key=lambda b: -len(b.text)):
-                    if self.closing.is_set() or epoch != self.epoch: break
-                    block.translated = getattr(self, 'corrections', {}).get(self.correction_key(output_language, block.text)) or translators[output_language].translate(block.text)
-                    block.narrated = (block.translated if narration_language == output_language
-                                      else (getattr(self, 'corrections', {}).get(self.correction_key(narration_language, block.text)) or translators[narration_language].translate(block.text)))
+                def translate_one(code, text):
+                    return getattr(self, 'corrections', {}).get(self.correction_key(code,text)) or translators[code].translate(text)
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    jobs = {}
+                    for block in sorted(blocks,key=lambda b:-len(b.text)):
+                        for code in required:
+                            key=(code,block.text)
+                            if key not in jobs: jobs[key]=pool.submit(translate_one,*key)
+                    for block in blocks:
+                        if self.closing.is_set() or epoch!=self.epoch:
+                            for job in jobs.values(): job.cancel()
+                            break
+                        block.translated=jobs[(output_language,block.text)].result()
+                        block.narrated=jobs[(narration_language,block.text)].result()
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 if getattr(self, 'auto_review', False):
                     self.events.put(('status', 'Vertaling natuurlijker maken met Gemini…'))

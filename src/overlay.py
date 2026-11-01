@@ -27,7 +27,7 @@ from translation import Translator
 RESOURCE = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 HOME = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 DATA = HOME / 'data'
-VERSION = '0.4.3'
+VERSION = '0.4.4'
 user32 = C.WinDLL('user32', use_last_error=True)
 kernel32 = C.WinDLL('kernel32', use_last_error=True)
 try:

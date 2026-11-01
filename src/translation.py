@@ -1,6 +1,7 @@
 """Offline English-to-selected-language translation with separate persistent caches."""
 import json
 import re
+import threading
 
 
 def normalize_spacing(text):
@@ -15,6 +16,7 @@ class Translator:
             from overlay import RESOURCE, DATA, HOME
             resource, data, home = resource or RESOURCE, data or DATA, home or HOME
         self.language = language_code(language)
+        self.cache_lock = threading.Lock()
         data.mkdir(parents=True, exist_ok=True)
         if self.language != 'en':
             import ctranslate2
@@ -22,7 +24,7 @@ class Translator:
             folder = model_folder(self.language, resource, data)
             self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(folder/'sentencepiece.model'))
             self.model = ctranslate2.Translator(str(folder/'model'), device='cpu', compute_type='int8',
-                                              inter_threads=1, intra_threads=4)
+                                              inter_threads=2, intra_threads=2)
         from localcache import cache_directory
         filename = 'translations.json' if self.language == 'nl' else f'translations-{self.language}.json'
         self.path = cache_directory(data)/filename
@@ -80,11 +82,10 @@ class Translator:
             output = re.sub(r'\bMiddle[- ]earth\b', 'Midden-aarde', output, flags=re.I)
         output = re.sub(r'\s+([,.!?;:])', r'\1', output)
         output = re.sub(r'([.!?])(?=[A-Za-zÀ-ÿ])', r'\1 ', output)
-        self.cache[text] = output
-        if len(self.cache) > 15000:
-            self.cache.pop(next(iter(self.cache)))
-        temp = self.path.with_suffix('.tmp')
-        temp.write_text(json.dumps(self.cache, ensure_ascii=False), encoding='utf-8')
-        temp.replace(self.path)
+        with self.cache_lock:
+            self.cache[text] = output
+            temp = self.path.with_suffix('.tmp')
+            temp.write_text(json.dumps(self.cache, ensure_ascii=False), encoding='utf-8')
+            temp.replace(self.path)
         return output
 

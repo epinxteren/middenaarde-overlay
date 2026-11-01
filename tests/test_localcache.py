@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 from overlay import Block
 from speech import wav_bytes
 from localcache import DiskAudioCache, CachedRecognizer
@@ -13,6 +13,20 @@ from translationhelp import AutomaticReviewer
 
 
 class CacheTests(unittest.TestCase):
+    def test_letter_cache_survives_restart_and_background_or_brightness_change(self):
+        with tempfile.TemporaryDirectory() as folder:
+            first=Image.new('RGB',(800,300),'#151515')
+            draw=ImageDraw.Draw(first)
+            draw.rectangle((10,10,690,75),fill='#29231b')
+            draw.text((20,20),'Take 2 cards and continue the adventure.',fill='#f0e4bd',font=ImageFont.load_default(size=25))
+            engine=SimpleNamespace(backend='test',warning='',read=AsyncMock(return_value=[Block('Take 2 cards and continue the adventure.',10,10,680,65,25)]))
+            asyncio.run(CachedRecognizer(engine,Path(folder),'test').read(first))
+            second=ImageEnhance.Brightness(first).enhance(.9)
+            ImageDraw.Draw(second).rectangle((20,150,750,280),fill='#383838')
+            result=asyncio.run(CachedRecognizer(engine,Path(folder),'test').read(second))
+            self.assertEqual(result[0].text,'Take 2 cards and continue the adventure.')
+            self.assertEqual(engine.read.await_count,1)
+
     def test_audio_survives_restart_and_rejects_corruption(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)
