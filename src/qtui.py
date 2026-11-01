@@ -21,6 +21,7 @@ from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_hand
 from speech import Speaker
 from voiceui import VoiceDialog
 from gemini_ocr import OCRError
+from keyhelp import show_key_help
 from languages import LANGUAGES, language_code, speech_language
 from languagepacks import model_available, install_language
 
@@ -407,6 +408,9 @@ class App:
         notice.setWordWrap(True); layout.addRow(notice)
         key = QLineEdit(self.speaker.keys.get('google', '')); key.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addRow('Google API-sleutel', key)
+        help_button = QPushButton('Waar maak ik de sleutel en waar plak ik hem?')
+        help_button.clicked.connect(lambda: show_key_help(dialog, 'google'))
+        layout.addRow(help_button)
         model = QComboBox(); model.setEditable(True); model.addItems(['gemini-3.8-flash', 'gemini-2.5-flash'])
         model.setCurrentText(self.ocr_model); layout.addRow('Beeldmodel (geen TTS-model)', model)
         interval = QSpinBox(); interval.setRange(5, 120); interval.setValue(self.ocr_interval); interval.setSuffix(' seconden')

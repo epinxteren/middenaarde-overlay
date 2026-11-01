@@ -6,6 +6,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QLineEdit, QDoubleSpinBox, QSpinBox, QTextEdit, QPushButton, QDialogButtonBox)
 from speech import PROVIDERS, VOICES, voices
+from keyhelp import show_key_help
 from languages import LANGUAGES, SAMPLES, speech_profile
 
 
@@ -31,6 +32,9 @@ class VoiceDialog(QDialog):
         self.key = QLineEdit(); self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText('Versleuteld opgeslagen voor jouw Windows-account')
         form.addRow('API-sleutel', self.key)
+        self.key_help = QPushButton('Waar maak ik de sleutel en waar plak ik hem?')
+        self.key_help.clicked.connect(lambda: show_key_help(self, self.current))
+        form.addRow('', self.key_help)
         self.region = QLineEdit(); form.addRow('Azure-regio', self.region)
         self.voice = QComboBox(); self.voice.setEditable(True); form.addRow('Stem / Voice ID', self.voice)
         self.fetch = QPushButton('Haal stemmen op'); self.fetch.clicked.connect(self.fetch_voices); form.addRow('', self.fetch)
@@ -79,6 +83,7 @@ class VoiceDialog(QDialog):
         self.speed.setValue(p['speed']); self.volume.setValue(p['volume']); self.style.setPlainText(p['style'])
         self.stability.setValue(p['stability']); self.similarity.setValue(p['similarity']); self.expressiveness.setValue(p['expressiveness'])
         self.key.setEnabled(self.current in ('google','eleven','azure'))
+        self.form.setRowVisible(self.key_help, self.key.isEnabled())
         self.region.setEnabled(self.current=='azure'); self.style.setEnabled(self.current=='google')
         self.model.setEnabled(self.current in ('google','eleven'))
         for w in (self.stability,self.similarity,self.expressiveness): w.setEnabled(self.current=='eleven')

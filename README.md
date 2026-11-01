@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.3.0).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.3.1).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -40,6 +40,8 @@ Version 0.3.0 offers three engines under **Tekstherkenning**:
 | **Google Gemini · online** | Google API | Google API key and image-capable Gemini model; uses account quota/credits |
 
 Choose an engine in the app; switching takes effect without restarting and is remembered in `data/ui.ini`. The label shows the active engine or a Windows fallback. On other PCs, extract the complete release ZIP including `_internal`; OCR does not download anything during gameplay.
+
+Use **Waar maak ik de sleutel en waar plak ik hem?** beside the key fields for step-by-step in-app instructions and links, including how to import an existing Google project and the difference between Gemini and Cloud Text-to-Speech.
 
 For Gemini, open **Gemini OCR-instellingen…**, enter your Google key, choose the image model (default `gemini-3.8-flash`, editable), and save. Do not choose a `tts` model for image recognition. The Google key is shared with Gemini narration and is stored using Windows DPAPI. Choosing an OCR provider does not change the narration provider. You can use built-in OCR with Gemini narration, or Gemini OCR with Piper narration.
 
