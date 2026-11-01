@@ -1,4 +1,5 @@
 """In-app setup instructions. No credentials are included in help content."""
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
 
 HELP = {
@@ -47,6 +48,13 @@ def show_key_help(parent, provider='google'):
         '<hr><p><b>Opslag:</b> sleutels worden met Windows DPAPI versleuteld voor jouw Windows-account opgeslagen. '
         'Op een andere pc voer je ze opnieuw in. Plak sleutels alleen in de app, niet in chats of screenshots. '
         'Online gebruik kan API-tegoed kosten; ingebouwde OCR en Piper werken zonder sleutel.</p>')
+    palette = text.palette()
+    palette.setColor(QPalette.ColorRole.Base, QColor('#101820'))
+    palette.setColor(QPalette.ColorRole.Text, QColor('#e7e0cc'))
+    text.setPalette(palette); text.viewport().setPalette(palette)
+    frame = text.document().rootFrame()
+    frame_format = frame.frameFormat(); frame_format.setBackground(QColor('#101820'))
+    frame.setFrameFormat(frame_format)
     layout.addWidget(text)
     buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
     buttons.button(QDialogButtonBox.StandardButton.Close).setText('Sluiten')
