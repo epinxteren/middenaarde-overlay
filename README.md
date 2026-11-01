@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.3.2).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.3.3).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -199,3 +199,12 @@ git push origin v0.2.2
 Selected OCR engine → paragraph grouping and stable-page check → local CTranslate2 / Argos English-to-selected-language model → transparent, click-through Qt window → selected Piper, Microsoft Edge, Google Gemini, ElevenLabs or Azure narration. A small exact-match glossary and disk cache reduce repeat work. The overlay is a separate app; it is not a game mod and does not bundle the game's copyrighted text, artwork or save files.
 
 App source: **GPL-3.0-or-later**. Models and dependencies retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), including attribution to the OPUS-MT authors and Piper/MLS voice dataset. No affiliation with Fantasy Flight Games, Middle-earth Enterprises, Google or Steam.
+
+
+### Kindvriendelijke tekst (optioneel)
+
+Schakel **Kindvriendelijk formuleren (Gemini)** in en open **Instructie kindvriendelijke tekst…** om je eigen wensen op te slaan. De standaardinstructie verzacht marteling en seksuele verwijzingen zonder expliciete details en vraagt namen, spelregels en getallen te behouden. De aangepaste tekst wordt zowel in de overlay als bij het voorlezen gebruikt, ook als daarvoor verschillende talen zijn gekozen. Standaard staat deze optie uit.
+
+Gebruik de Google-sleutel en het model bij **Gemini OCR-instellingen**. De knop **Google-sleutel toevoegen: uitleg** legt uit waar je de sleutel maakt en plakt. Deze functie werkt met alle drie OCR-keuzes. Bij lokale OCR worden alleen de te bewerken teksten naar Gemini gestuurd. Dit gebruikt extra API-tegoed; identieke teksten worden tijdens dezelfde sessie gecachet.
+
+Je kunt de standaardinstructie herstellen. Bij een mislukte bewerking pauzeert de verwerking; de app toont of leest dan geen onbehandelde vertaling als terugval. Wijzigingen aan getallen worden automatisch afgekeurd. Automatische bewerking kan andere details missen of spelregels anders formuleren: controleer bij twijfel de oorspronkelijke tekst. De oorspronkelijke speltekst en spelbeelden zelf worden niet aangepast.

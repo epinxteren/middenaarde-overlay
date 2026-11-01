@@ -22,6 +22,7 @@ from speech import Speaker
 from voiceui import VoiceDialog
 from gemini_ocr import OCRError
 from keyhelp import show_key_help
+from childfriendly import ChildFriendlyRewriter, DEFAULT_INSTRUCTION
 from languages import LANGUAGES, language_code, speech_language
 from languagepacks import model_available, install_language
 
@@ -199,6 +200,8 @@ class App:
         self.ocr_model = self.preferences.value('ocr_model', 'gemini-3.8-flash', type=str)
         self.ocr_interval = self.preferences.value('ocr_interval', 10, type=int)
         self.ocr_revision = 0
+        self.child_friendly = self.preferences.value('child_friendly', False, type=bool)
+        self.child_instruction = self.preferences.value('child_instruction', DEFAULT_INSTRUCTION, type=str)
         self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
         self.output_language = language_code(self.preferences.value('overlay_language', 'nl'))
         self.narration_choice = self.preferences.value('narration_language', 'same')
@@ -301,6 +304,14 @@ class App:
         self.show_text.setChecked(self.preferences.value('show_overlay_text', True, type=bool))
         self.show_text.setToolTip('Uit: de oorspronkelijke speltekst blijft zichtbaar. Vertalen en voorlezen blijven werken.')
         layout.addWidget(self.show_text)
+        self.child_friendly_box = QCheckBox('Kindvriendelijk formuleren (Gemini)')
+        self.child_friendly_box.setChecked(self.child_friendly)
+        self.child_friendly_box.setToolTip('Optioneel: vertaald verhaal verzachten via Google. Gebruikt API-tegoed, ook bij lokale OCR.')
+        self.child_friendly_box.toggled.connect(self.change_child_friendly)
+        layout.addWidget(self.child_friendly_box)
+        child_settings = QPushButton('Instructie kindvriendelijke tekst…')
+        child_settings.clicked.connect(self.child_friendly_settings)
+        layout.addWidget(child_settings)
         length_row = QHBoxLayout()
         length_row.addWidget(QLabel('Vertaal vanaf'))
         self.minimum_length = QSpinBox()
@@ -400,6 +411,48 @@ class App:
 
     def repeat(self):
         if self.latest_text: self.speaker.say(self.latest_text, language=self.current_speech_language())
+
+    def invalidate_page(self):
+        self.epoch += 1
+        self.overlay.blocks = []
+        self.overlay.click_regions = []
+        self.overlay.hide()
+        self.speaker.stop()
+        self.latest_text = ''
+        self.preview.clear()
+
+    def change_child_friendly(self, enabled):
+        self.child_friendly = enabled
+        self.preferences.setValue('child_friendly', enabled)
+        self.preferences.sync()
+        self.invalidate_page()
+
+    def child_friendly_settings(self):
+        dialog = QDialog(self.root); dialog.setWindowTitle('Kindvriendelijke tekst – instructie')
+        dialog.resize(630, 470)
+        layout = QVBoxLayout(dialog)
+        label = QLabel('Deze optionele bewerking gaat via Gemini en gebruikt API-tegoed.\n'
+                       'De aangepaste tekst wordt getoond én voorgelezen.\n'
+                       'Spelbeelden en de oorspronkelijke Engelse tekst worden niet aangepast.\n'
+                       'Automatische bewerking kan details missen; controleer spelregels bij twijfel.')
+        label.setWordWrap(True); layout.addWidget(label)
+        instruction = QTextEdit(self.child_instruction); layout.addWidget(instruction)
+        reset = QPushButton('Standaardinstructie herstellen')
+        reset.clicked.connect(lambda: instruction.setPlainText(DEFAULT_INSTRUCTION)); layout.addWidget(reset)
+        help_button = QPushButton('Google-sleutel toevoegen: uitleg')
+        help_button.clicked.connect(lambda: show_key_help(dialog, 'google')); layout.addWidget(help_button)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText('Opslaan')
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('Annuleren')
+        layout.addWidget(buttons); buttons.rejected.connect(dialog.reject)
+        def save():
+            text = instruction.toPlainText().strip()
+            if not text:
+                QMessageBox.information(dialog, 'Instructie ontbreekt', 'Vul een instructie in of herstel de standaardinstructie.'); return
+            self.child_instruction = text
+            self.preferences.setValue('child_instruction', text); self.preferences.sync()
+            self.invalidate_page(); dialog.accept()
+        buttons.accepted.connect(save); dialog.exec()
 
     def google_ocr_settings(self):
         dialog = QDialog(self.root); dialog.setWindowTitle('Gemini OCR-instellingen')
@@ -588,6 +641,7 @@ class App:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         previous, rendered, previous_epoch = None, None, -1
+        rewriter, rewrite_settings = None, None
         while not self.closing.is_set():
             if self.closing.wait(0.65): break
             if self.ocr_provider != selected_ocr or self.ocr_revision != selected_revision:
@@ -614,6 +668,7 @@ class App:
                     previous = rendered = None
                     continue
                 epoch, region, minimum = self.epoch, self.region, self.min_chars
+                child_enabled, child_instruction = self.child_friendly, self.child_instruction
                 output_language, narration_language = self.output_language, self.current_speech_language()
                 if epoch != previous_epoch:
                     previous = rendered = None
@@ -657,6 +712,15 @@ class App:
                     block.narrated = (block.translated if narration_language == output_language
                                       else translators[narration_language].translate(block.text))
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
+                if child_enabled:
+                    self.events.put(('status', 'Kindvriendelijke tekst maken…'))
+                    settings = (self.speaker.keys.get('google', ''), self.ocr_model, child_instruction)
+                    if settings != rewrite_settings:
+                        rewriter = ChildFriendlyRewriter(*settings); rewrite_settings = settings
+                    rewritten = rewriter.rewrite([text for block in blocks for text in (block.translated, block.narrated)])
+                    for i, block in enumerate(blocks):
+                        block.translated, block.narrated = rewritten[2*i:2*i+2]
+                    if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 fresh = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 if selected_ocr == 'gemini':
                     # Validate locally instead of paying for a second image request.
@@ -698,7 +762,7 @@ class App:
                 if self.overlay.progress_text == 'Tekst herkennen…': self.show_progress('')
             elif kind == 'ocr_failed':
                 self.start_button.setText('Start overlay')
-                self.status.setText(value+' · OCR gepauzeerd; klik Start overlay om opnieuw te proberen.')
+                self.status.setText(value+' · Verwerking gepauzeerd; klik Start overlay om opnieuw te proberen.')
                 self.speaker.stop()
                 self.overlay.hide()
             elif kind == 'ready':

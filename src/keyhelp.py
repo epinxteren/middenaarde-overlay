@@ -3,13 +3,14 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
 
 HELP = {
-    'google': '''<h2>Google Gemini: één sleutel voor OCR en spraak</h2>
+    'google': '''<h2>Google Gemini: één sleutel voor OCR, spraak en kindvriendelijke tekst</h2>
 <ol><li>Open <a href="https://aistudio.google.com/api-keys">Google AI Studio – API Keys</a> en log zelf in.</li>
 <li>Kies <b>Create API key</b> en een project. Gebruik een sleutel voor de <b>Gemini API / Generative Language API</b>.</li>
 <li>Kopieer de sleutel. Plak hem in deze app bij <b>Gemini OCR-instellingen → Google API-sleutel</b>,
 of bij <b>Stem &amp; providers → Google AI · Gemini → API-sleutel</b>.</li>
 <li>Klik <b>Opslaan</b>. Dezelfde opgeslagen sleutel is daarna in beide instellingen beschikbaar.
 Voor spraak kun je eerst <b>Luistervoorbeeld</b> gebruiken; voor OCR kies je <b>Google Gemini · online</b> en <b>Start overlay</b>.</li></ol>
+<p>Voor <b>Kindvriendelijk formuleren</b> gebruikt de app ook deze sleutel en het model uit Gemini OCR-instellingen. Dit werkt ook als je ingebouwde of Microsoft OCR kiest; dan gaat alleen de te bewerken tekst naar Gemini.</p>
 <h3>Ik heb al een Google-project of sleutel</h3>
 <p>AI Studio toont niet automatisch al je Cloud-projecten. Ga naar <b>Dashboard → Projects → Import projects</b>,
 selecteer je bestaande project en ga terug naar <b>API Keys</b>. Controleer dat je met hetzelfde Google-account bent ingelogd.</p>
