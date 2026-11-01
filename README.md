@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.4.1).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.4.3).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -254,6 +254,25 @@ Op **Informatie** staan alle stappen, met uitleg over lokale detectie, OCR, loka
 **Tekststroken uitsnijden vóór verzenden** staat standaard aan bij Gemini OCR. De lokale detector knipt tekststroken uit het spelbeeld en zet die in een compacte afbeelding. De herkende coördinaten worden teruggezet naar de oorspronkelijke positie. Debuglogs toont de oorspronkelijke en verzonden afmetingen, bestandsgrootte en het aantal stroken. Als uitsnijden geen kleiner beeld oplevert of geen stroken vindt, valt de app terug op het gekozen gebied, nog steeds verkleind tot maximaal 1600 pixels. Zet uitsnijden uit als de detector relevante tekst mist.
 
 ### Vertaalhulp met origineel Engels en spelcontext
+
+**Vertalingen automatisch verbeteren met Gemini vóór tonen en voorlezen** is een aparte schakelaar op Vertaalhulp. Gemini controleert het originele Engels, de lokale vertaling en de bordspelcontext op onnatuurlijk taalgebruik, verkeerde uitdrukkingen en achtergebleven Engelse woorden. De verbeterde tekst gaat naar zowel overlay als spraak. De kindvriendelijke bewerking volgt daarna, indien ingeschakeld. Bij een AI-fout pauzeert de verwerking met een melding. Deze aanvragen gebruiken extra API-tegoed, buiten de OCR-teller.
+
+### Blijvende lokale caches
+
+De Windows-app bewaart caches in `%LOCALAPPDATA%\MiddenaardeOverlay\cache`, onafhankelijk van de installatiemap. Daardoor blijven ze beschikbaar na app-/pc-herstart en bij een volgende appversie. Bestaande lokale vertaalbestanden worden overgenomen wanneer er nog geen centrale vertaalcache bestaat.
+
+- Identiek beeld plus OCR-provider/model: herkende Engelse tekst en coördinaten, zonder de afbeelding zelf op te slaan.
+- Engelse tekst plus doeltaal: lokale vertaling, ook als het beeld verschilt.
+- Paginatekst, vertaling, model en talen: automatische AI-correctie met de volledige paginacontext.
+- Gesproken tekst plus provider, model, taal, stem en synthese-instellingen: audio. Afspeelvolume maakt geen nieuwe opname nodig.
+
+Lokale caches worden niet automatisch gewist en staan los van de optionele publieke audiocache. Ze kunnen dus schijfruimte blijven gebruiken. Een cachehit voorkomt een nieuwe aanvraag; veranderde tekst of instellingen vormt een andere aanvraag. Gemini kan bij een eerste aanvraag nog steeds een fout maken.
+
+### Herhaalbare dummyspeltest
+
+Voer met de ontwikkelafhankelijkheden `python tools/game_simulator.py simulator-results` uit. Het testvenster gebruikt echte lokale OCR, vertaling, Qt-overlay, klikafhandeling en schijfcaches. Gemini en audio-uitvoer zijn gecontroleerde offline simulaties met vertraging, zonder sleutels of API-kosten. De test wisselt verhaalpagina's en achtergrondanimaties, klikt op de overlay en controleert dat tekst/spraak bij achtergrondanimatie behouden blijven en oude tekst bij een echte scenariowissel snel verdwijnt. Het resultaat en screenshots staan in de opgegeven uitvoermap. Dit vervangt geen live controle van een externe spraakdienst of de echte gamefocus.
+
+### Handmatige bespreking
 
 Op **Vertaalhulp** zie je de oorspronkelijke Engelse OCR-tekst naast de vertaling. Schrijf wat er niet klopt en klik **Vraag AI om verbetering**. Gemini krijgt alle tekstblokken van die pagina samen, je vraag, de doeltalen en context over **The Lord of the Rings: Journeys in Middle-earth**, het coöperatieve bordspel in Midden-aarde. Zo kan bijvoorbeeld *deduction* als *logisch redeneren* worden vertaald in plaats van *aftrek*.
 

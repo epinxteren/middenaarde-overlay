@@ -173,6 +173,8 @@ class Speaker:
         self.duck_enabled, self.duck_level = False, 30
         self.lock = threading.Lock()
         self.cache = {}
+        from localcache import DiskAudioCache, cache_directory
+        self.disk_cache = DiskAudioCache(cache_directory(DATA)/'audio-cache')
         from sharedcache import SharedAudioCache
         self.shared_cache = SharedAudioCache(events)
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -231,6 +233,8 @@ class Speaker:
                     digest = audio_key(provider, profile, chunk)
                     audio = self.cache.get(digest)
                     if audio is None:
+                        audio = self.disk_cache.get(digest)
+                    if audio is None:
                         self.events.put(('speech_status', (generation, 'Spraak laden…')))
                         audio = self.shared_cache.get(digest)
                         if audio is None:
@@ -238,6 +242,7 @@ class Speaker:
                             self.shared_cache.put(digest, audio)
                         if sum(map(len, self.cache.values()))+len(audio)>40_000_000: self.cache.clear()
                         if len(audio)<=40_000_000: self.cache[digest] = audio
+                        self.disk_cache.put(digest, audio)
                     with wave.open(io.BytesIO(audio), 'rb') as source:
                         params = source.getparams(); pcm = source.readframes(source.getnframes())
                         duration = source.getnframes()/source.getframerate()

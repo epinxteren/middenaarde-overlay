@@ -16,3 +16,19 @@ def text_regions_unchanged(before, after, blocks, offset=(0, 0)):
         if sum(histogram[25:]) > a.width * a.height * .01:
             return False
     return True
+
+
+def text_page_replaced(before, after, blocks, offset=(0, 0)):
+    """Strong visual change in story text, not small OCR/hover jitter."""
+    from PIL import ImageChops, ImageFilter
+    if before.size != after.size: return True
+    for block in blocks:
+        if len(block.text.strip()) < 65: continue
+        x, y = block.x-offset[0], block.y-offset[1]
+        box = (max(0,int(x)), max(0,int(y)), min(before.width,int(x+block.width)), min(before.height,int(y+block.height)))
+        if box[2] <= box[0] or box[3] <= box[1]: continue
+        a = before.crop(box).convert('L').filter(ImageFilter.GaussianBlur(.5))
+        b = after.crop(box).convert('L').filter(ImageFilter.GaussianBlur(.5))
+        histogram = ImageChops.difference(a,b).histogram()
+        if sum(histogram[35:]) > a.width*a.height*.08: return True
+    return False

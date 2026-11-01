@@ -8,6 +8,7 @@ import platform_support
 from overlay import Block
 import qtui
 import speech
+from PIL import Image
 from voiceui import VoiceDialog
 
 
@@ -124,6 +125,36 @@ class UiLanguageTests(unittest.TestCase):
         self.assertTrue(self.app.cache_enabled.isChecked())
         self.assertEqual(self.app.cache_url.text(), '')
 
+    def test_background_ocr_does_not_stop_pending_narration(self):
+        blocks = self.render()
+        self.speaker.busy = True
+        self.speaker.generation = 17
+        self.speaker.reset_mock()
+        self.app.events.put(('speech_status', (17, 'Spraak laden…')))
+        self.app.poll()
+        for _ in range(4):
+            self.app.events.put(('detect_status', '2 mogelijke tekstregels'))
+            self.app.events.put(('ocr_wait', self.app.epoch))
+            self.app.events.put(('ocr_wait_done', self.app.epoch))
+            self.app.poll()
+        self.speaker.stop.assert_not_called()
+        self.assertTrue(self.speaker.busy)
+        self.assertEqual(self.app.overlay.blocks, blocks)
+
+    def test_click_preserves_page_and_does_not_activate_overlay(self):
+        import ctypes
+        blocks = self.render()
+        epoch = self.app.epoch
+        self.speaker.busy = False
+        self.speaker.reset_mock()
+        self.app.click_speech(blocks[0].narrated)
+        self.assertEqual(self.app.epoch, epoch)
+        self.assertEqual(self.app.overlay.blocks, blocks)
+        self.speaker.say.assert_called_once()
+        msg = qtui.W.MSG()
+        msg.message = 0x0021
+        self.assertEqual(self.app.overlay.nativeEvent(b'windows_generic_MSG', ctypes.addressof(msg)), (True, 3))
+
     def test_quota_requires_confirmation_before_resuming(self):
         self.app.enabled.clear()
         with patch('qtui.QMessageBox.question', return_value=qtui.QMessageBox.StandardButton.No):
@@ -209,7 +240,7 @@ class WorkerLanguageTests(unittest.TestCase):
             return model
         with patch('qtui.Recognizer', Recognizer), patch('qtui.Translator', side_effect=translator) as models, \
                 patch('qtui.find_game', return_value=1), patch('qtui.client_box', return_value=(0, 0, 800, 600)), \
-                patch('qtui.active_game', return_value=True), patch('qtui.ImageGrab.grab'), \
+                patch('qtui.active_game', return_value=True), patch('qtui.ImageGrab.grab', return_value=Image.new('RGB', (800, 600))), \
                 patch('qtui.ChildFriendlyRewriter') as rewrite, \
                 patch('textdetect.detect_text') as detection:
             detection.return_value.lines = 0

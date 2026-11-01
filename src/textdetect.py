@@ -19,7 +19,9 @@ def detect_text(image):
     edges = cv2.Canny(gray, 70, 160)
     # Join nearby character edges into word/line candidates; reject large illustrations.
     joined = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3)))
-    contours, _ = cv2.findContours(joined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Story text often sits inside a closed panel border. RETR_EXTERNAL drops
+    # every text contour inside that border, falsely reporting an empty page.
+    contours, _ = cv2.findContours(joined, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     candidates = []
     for contour in contours:
         x, y, width, height = cv2.boundingRect(contour)

@@ -39,6 +39,13 @@ def place_native(widget, box):
 
 
 class Overlay(QWidget):
+    def nativeEvent(self, event_type, message):
+        # Consume clicks without taking focus from JiME (MA_NOACTIVATE).
+        msg = W.MSG.from_address(int(message))
+        if msg.message == 0x0021:  # WM_MOUSEACTIVATE
+            return True, 3
+        return super().nativeEvent(event_type, message)
+
     def __init__(self):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint |
                          Qt.WindowType.Tool |
@@ -210,6 +217,8 @@ class App:
         self.detect_enabled = self.preferences.value('detect_text_first', True, type=bool)
         self.detect_minimum = self.preferences.value('detect_minimum_lines', 3, type=int)
         self.child_friendly = self.preferences.value('child_friendly', False, type=bool)
+        self.auto_review = self.preferences.value('auto_review', False, type=bool)
+        self.auto_review_model = self.preferences.value('auto_review_model', 'gemini-3.5-flash-lite')
         self.child_pause = self.preferences.value('child_pause_on_error', True, type=bool)
         self.child_instruction = self.preferences.value('child_instruction', DEFAULT_INSTRUCTION, type=str)
         self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
@@ -548,6 +557,18 @@ class App:
         return hashlib.sha256((language+'\0'+text).encode()).hexdigest()
 
     def build_translation_help(self, layout):
+        self.auto_review_box = QCheckBox('Vertalingen automatisch verbeteren met Gemini vóór tonen en voorlezen')
+        self.auto_review_box.setChecked(self.auto_review)
+        layout.addWidget(self.auto_review_box)
+        auto_hint = QLabel('Gebruikt je Google-sleutel. Stuurt origineel Engels en vertaling mee; extra API-verbruik. Resultaten worden lokaal hergebruikt. Bij een fout pauzeert de verwerking met een melding.')
+        auto_hint.setWordWrap(True); layout.addWidget(auto_hint)
+        model_row = QHBoxLayout(); model_row.addWidget(QLabel('Model voor automatische taalcontrole'))
+        self.auto_model_choice = QComboBox(); self.auto_model_choice.setEditable(True)
+        self.auto_model_choice.addItems(['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash'])
+        self.auto_model_choice.setCurrentText(self.auto_review_model)
+        model_row.addWidget(self.auto_model_choice); layout.addLayout(model_row)
+        self.auto_model_choice.currentTextChanged.connect(self.change_auto_model)
+        self.auto_review_box.toggled.connect(self.change_auto_review)
         label = QLabel('Bespreek fouten met AI op basis van de oorspronkelijke Engelse tekst. Een aanvraag gaat naar Gemini en gebruikt API-tegoed. Pas een voorstel pas toe nadat je het hebt gecontroleerd.')
         label.setWordWrap(True); layout.addWidget(label)
         context = QLabel('AI-context: The Lord of the Rings: Journeys in Middle-earth · coöperatief bordspel · Midden-aarde · fantasy, onderzoeken en gevechten')
@@ -572,6 +593,16 @@ class App:
         self.review_apply = QPushButton('Gebruik verbeterde tekst'); self.review_apply.setEnabled(False)
         self.review_apply.clicked.connect(self.apply_translation_help); row.addWidget(self.review_apply)
         layout.addLayout(row)
+
+    def change_auto_review(self, enabled):
+        self.auto_review = enabled
+        self.preferences.setValue('auto_review', enabled); self.preferences.sync()
+        self.invalidate_page()
+
+    def change_auto_model(self, model):
+        self.auto_review_model = model.strip()
+        self.preferences.setValue('auto_review_model', self.auto_review_model); self.preferences.sync()
+        self.invalidate_page()
 
     def ask_translation_help(self):
         if not self.review_blocks:
@@ -670,6 +701,10 @@ class App:
     def build_cache_settings(self, layout):
         from sharedcache import server_url
         self.cache_enabled = QCheckBox('Gedeelde audiocache gebruiken en bijdragen')
+        from localcache import cache_directory
+        local_hint = QLabel('Lokale cache (blijft bewaard na herstart): '+str(cache_directory(DATA))+
+                            '\nBeeldherkenning, tekstvertalingen, AI-verbeteringen en audio worden lokaal hergebruikt. De schakelaar hieronder betreft alleen openbaar delen.')
+        local_hint.setWordWrap(True); layout.addWidget(local_hint)
         self.cache_enabled.setChecked(self.preferences.value('shared_audio_enabled', True, type=bool))
         layout.addWidget(self.cache_enabled)
         notice = QLabel('Opnamen worden openbaar gedeeld op jouw server. Dezelfde tekst, provider, stem, model, taal en steminstellingen gebruiken dezelfde opname. Geen screenshots of API-sleutels worden meegestuurd. Zonder serveradres blijft voorlezen normaal werken.')
@@ -781,7 +816,9 @@ class App:
             options = dict(key=self.speaker.keys.get('google', ''), model=self.ocr_model, budget=self.ocr_budget, crop_text=self.ocr_crop, on_image=self.trace,
                 on_wait=lambda: self.events.put(('ocr_wait', self.epoch)),
                 cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
-        return Recognizer(provider, **options)
+        from localcache import CachedRecognizer, cache_directory
+        return CachedRecognizer(Recognizer(provider, **options), cache_directory(DATA)/'ocr-cache',
+                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop])
 
     def change_ocr(self):
         self.ocr_provider = self.ocr_choice.currentData()
@@ -797,6 +834,7 @@ class App:
         self.ocr_label.setText('Google Gemini: beeldgebied gaat online naar Google; gebruikt API-tegoed.' if self.ocr_provider == 'gemini' else 'OCR wisselen…')
 
     def click_speech(self, text):
+        self.trace('Overlayklik: stop stem' if self.speaker.busy and self.speaker.current_text == text else 'Overlayklik: start stem')
         if self.speaker.busy and self.speaker.current_text == text:
             self.speaker.stop()
             self.show_progress('')
@@ -937,6 +975,10 @@ class App:
         previous, rendered, previous_epoch = None, None, -1
         rewriter, rewrite_settings = None, None
         cached_image, cached_blocks, cached_layout = None, None, None
+        page_hidden = False
+        from translationhelp import AutomaticReviewer
+        from localcache import cache_directory
+        automatic_reviewer = AutomaticReviewer(cache_directory(DATA)/'ai-translations.json')
         while not self.closing.is_set():
             if self.closing.wait(0.65): break
             if self.ocr_provider != selected_ocr or self.ocr_revision != selected_revision:
@@ -965,7 +1007,6 @@ class App:
                 if not active_game(hwnd):
                     self.trace('Spel gevonden; wacht op focus. Klik in het spel.')
                     self.events.put(('status', 'Spel gevonden · klik in het spel om te vertalen'))
-                    previous = rendered = None
                     continue
                 epoch, region, minimum = self.epoch, self.region, self.min_chars
                 child_enabled, child_instruction = self.child_friendly, self.child_instruction
@@ -975,6 +1016,7 @@ class App:
                     previous = rendered = None
                     previous_epoch = epoch
                     cached_image = cached_blocks = cached_layout = None
+                    page_hidden = False
                 x, y, right, bottom = box
                 width, height = right-x, bottom-y
                 offset = (0, 0)
@@ -984,6 +1026,27 @@ class App:
                     offset = (int(width*a), int(height*b))
                     grab_box = (x+offset[0], y+offset[1], x+int(width*c), y+int(height*d))
                 image = ImageGrab.grab(bbox=grab_box, all_screens=True)
+                # The detector is only a cheap gate for NEW pages. Its contour
+                # count/layout changes with animations and must not invalidate
+                # text that is still visibly identical (or cancel pending TTS).
+                if cached_image is not None and cached_blocks and rendered is not None:
+                    from capturecheck import text_regions_unchanged
+                    if text_regions_unchanged(cached_image, image, cached_blocks, offset):
+                        if page_hidden:
+                            self.events.put(('render', (epoch, hwnd, box, cached_blocks, rendered)))
+                            page_hidden = False
+                        self.trace('Tekst ongewijzigd: voorlezen blijft actief, geen OCR-aanvraag')
+                        continue
+                    if not page_hidden:
+                        from capturecheck import text_page_replaced
+                        if text_page_replaced(cached_image, image, cached_blocks, offset):
+                            if self.closing.wait(.12): break
+                            confirmation = ImageGrab.grab(bbox=grab_box, all_screens=True)
+                            if text_regions_unchanged(image, confirmation, cached_blocks, offset):
+                                self.trace('Nieuwe verhaalpagina gedetecteerd: oude tekst en spraak verwijderd')
+                                self.events.put(('clear', epoch))
+                                page_hidden = True
+                                image = confirmation
                 layout_signature = None
                 if getattr(self, 'detect_enabled', False):
                     from textdetect import detect_text
@@ -992,7 +1055,7 @@ class App:
                     layout_signature = detected.layout
                     message = f'{detected.lines} mogelijke tekstregels · {(time.monotonic()-started_detection)*1000:.0f} ms · grens {self.detect_minimum}'
                     self.events.put(('detect_status', message))
-                    if detected.lines < self.detect_minimum:
+                    if detected.lines < self.detect_minimum and not cached_blocks:
                         self.trace('Detectie: te weinig tekst; geen OCR-aanvraag')
                         self.events.put(('detection_empty', epoch))
                         previous = rendered = None
@@ -1016,16 +1079,28 @@ class App:
                 self.trace(f'OCR klaar in {time.monotonic()-started:.1f}s: {count} blokken, {len(blocks)} boven minimum {minimum}')
                 for block in blocks:
                     block.x += offset[0]; block.y += offset[1]
-                signature = tuple((b.text, round(b.x/8), round(b.y/8), round(b.width/8)) for b in blocks)
+                # OCR box jitter is not a new story page.
+                signature = tuple(' '.join(b.text.split()) for b in blocks)
                 if epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 if signature != previous:
-                    self.events.put(('clear', epoch))
                     previous = signature
-                    rendered = None
-                if signature == rendered: continue
+                if signature == rendered:
+                    translations = {' '.join(b.text.split()):(b.translated,b.narrated) for b in cached_blocks or []}
+                    for block in blocks:
+                        block.translated, block.narrated = translations.get(' '.join(block.text.split()), ('',''))
+                    if page_hidden and cached_blocks:
+                        self.events.put(('render', (epoch, hwnd, box, blocks, signature)))
+                        page_hidden = False
+                    cached_image, cached_blocks, cached_layout = image, blocks, layout_signature
+                    continue
+                if rendered is not None and not page_hidden:
+                    self.events.put(('clear', epoch))
+                    page_hidden = True
                 if not blocks:
+                    self.events.put(('clear', epoch))
                     self.events.put(('status', 'Actief · geen tekst gevonden die aan de ingestelde minimumlengte voldoet'))
                     rendered = signature
+                    cached_image = cached_blocks = cached_layout = None
                     continue
                 self.trace(f'Vertalen starten: {len(blocks)} blokken naar {output_language}/{narration_language}')
                 self.events.put(('status', 'Tekst in de gekozen taal maken…'))
@@ -1041,6 +1116,18 @@ class App:
                     block.narrated = (block.translated if narration_language == output_language
                                       else (getattr(self, 'corrections', {}).get(self.correction_key(narration_language, block.text)) or translators[narration_language].translate(block.text)))
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
+                if getattr(self, 'auto_review', False):
+                    self.events.put(('status', 'Vertaling natuurlijker maken met Gemini…'))
+                    self.trace('Automatische AI-vertaalcontrole starten')
+                    try:
+                        result = automatic_reviewer.improve(self.speaker.keys.get('google', ''), self.auto_review_model,
+                                                            blocks, output_language, narration_language)
+                    except Exception as exc:
+                        raise OCRError('AI-vertaalcontrole mislukt: '+str(exc)[:200]) from None
+                    if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set(): continue
+                    for block, item in zip(blocks, result['items']):
+                        block.translated, block.narrated = item['translation'], item['narration']
+                    self.trace('Automatische AI-vertaalcontrole klaar')
                 if child_enabled:
                     self.events.put(('status', 'Kindvriendelijke tekst maken…'))
                     settings = (self.speaker.keys.get('google', ''), self.ocr_model, child_instruction)
@@ -1076,6 +1163,7 @@ class App:
                     block.translated = normalize_spacing(block.translated)
                     block.narrated = normalize_spacing(block.narrated)
                 self.events.put(('render', (epoch, hwnd, box, blocks, signature)))
+                page_hidden = False
                 rendered = signature
                 cached_image, cached_blocks, cached_layout = image, blocks, layout_signature
             except OCRBudgetExceeded as exc:
@@ -1188,6 +1276,10 @@ class App:
                 if epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 token = (epoch, hwnd, signature)
                 if token != self.review_page:
+                    # Replace only once the new translation has been validated.
+                    # Background OCR must not erase a clickable translation or
+                    # cancel its narration while preparing a replacement.
+                    self.speaker.stop()
                     self.review_page, self.review_blocks = token, blocks
                     self.review_result, self.review_history = None, []
                     self.review_apply.setEnabled(False); self.review_chat.clear()

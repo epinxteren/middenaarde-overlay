@@ -23,7 +23,13 @@ class Translator:
             self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(folder/'sentencepiece.model'))
             self.model = ctranslate2.Translator(str(folder/'model'), device='cpu', compute_type='int8',
                                               inter_threads=1, intra_threads=4)
-        self.path = data/('translations.json' if self.language == 'nl' else f'translations-{self.language}.json')
+        from localcache import cache_directory
+        filename = 'translations.json' if self.language == 'nl' else f'translations-{self.language}.json'
+        self.path = cache_directory(data)/filename
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        legacy = data/filename
+        if self.path != legacy and legacy.exists() and not self.path.exists():
+            self.path.write_bytes(legacy.read_bytes())
         try:
             self.cache = json.loads(self.path.read_text(encoding='utf-8'))
             if not isinstance(self.cache, dict): self.cache = {}

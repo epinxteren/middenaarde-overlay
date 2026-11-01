@@ -1,8 +1,38 @@
 """On-demand contextual translation review using the original English text."""
 import json
 import re
+import hashlib
 from collections import Counter
 from speech import request, SpeechError
+
+
+class AutomaticReviewer:
+    """Cache whole pages: surrounding English is part of the context/key."""
+    def __init__(self, path):
+        self.path = path
+        try:
+            self.cache = json.loads(path.read_text('utf-8'))
+            if not isinstance(self.cache, dict): self.cache = {}
+        except (OSError, ValueError): self.cache = {}
+
+    def improve(self, key, model, blocks, output, narration):
+        context = [1, model, output, narration,
+                   [(b.text, b.translated, b.narrated) for b in blocks]]
+        digest = hashlib.sha256(json.dumps(context, ensure_ascii=False).encode()).hexdigest()
+        if digest in self.cache: return self.cache[digest]
+        result = review(key, model, blocks,
+            'Verbeter automatisch de volledige vertaling tot natuurlijk, vloeiend en grammaticaal correct taalgebruik. '
+            'Controleer alles tegen het originele Engels. Vertaal achtergebleven Engelse woorden, behalve eigennamen. '
+            'Herstel letterlijk vertaalde uitdrukkingen en onzinwoorden. Behoud de avontuurlijke Tolkien-sfeer, '
+            'de betekenis, alle spelregels en aantallen. Voeg niets toe.', output, narration)
+        self.cache[digest] = result
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.path.with_suffix('.tmp')
+            temp.write_text(json.dumps(self.cache, ensure_ascii=False), 'utf-8')
+            temp.replace(self.path)
+        except OSError: pass
+        return result
 
 
 def review(key, model, blocks, instruction, overlay_language, narration_language, history=()):
