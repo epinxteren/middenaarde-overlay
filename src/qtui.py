@@ -2,6 +2,8 @@
 import ctypes as C
 from ctypes import wintypes as W
 import hashlib
+import json
+import copy
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -203,6 +205,7 @@ class App:
         self.ocr_model = self.preferences.value('ocr_model', 'gemini-3.8-flash', type=str)
         self.ocr_limit = self.preferences.value('ocr_requests_per_minute', 5, type=int)
         self.ocr_budget = RequestBudget(self.ocr_limit)
+        self.ocr_crop = self.preferences.value('gemini_crop_text', True, type=bool)
         self.ocr_revision = 0
         self.detect_enabled = self.preferences.value('detect_text_first', True, type=bool)
         self.detect_minimum = self.preferences.value('detect_minimum_lines', 3, type=int)
@@ -217,6 +220,12 @@ class App:
         self.target = None
         self.last_game_box = None
         self.latest_text = ''
+        self.review_page = None
+        self.review_blocks = []
+        self.review_result = None
+        self.review_history = []
+        try: self.corrections = json.loads((DATA/'corrections.json').read_text('utf-8'))
+        except (OSError, ValueError): self.corrections = {}
         self.spoken = set()
         self.voice_ok = True
         self.ready = False
@@ -265,13 +274,14 @@ class App:
         self.tabs = QTabWidget()
         window_layout.addWidget(self.tabs, 1)
         pages = {}
-        for name in ('Overzicht', 'Detectie', 'Tekstherkenning', 'Talen / Stem', 'Kindvriendelijk', 'Audiocache', 'Debuglogs', 'Informatie'):
+        for name in ('Overzicht', 'Detectie', 'Tekstherkenning', 'Talen / Stem', 'Kindvriendelijk', 'Audiocache', 'Vertaalhulp', 'Debuglogs', 'Informatie'):
             scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
             page = QWidget(); section = QVBoxLayout(page)
             section.setContentsMargins(18, 14, 18, 14); section.setSpacing(10)
             scroll.setWidget(page); self.tabs.addTab(scroll, name); pages[name] = section
         self.build_detection_settings(pages['Detectie'])
         self.build_information(pages['Informatie'])
+        self.build_translation_help(pages['Vertaalhulp'])
         overview = pages['Overzicht']
         layout = pages['Talen / Stem']
         self.read_aloud = QCheckBox('Verhaaltekst automatisch voorlezen')
@@ -485,6 +495,8 @@ class App:
 
     def invalidate_page(self):
         self.epoch += 1
+        self.review_result = None
+        if hasattr(self, 'review_apply'): self.review_apply.setEnabled(False)
         self.overlay.blocks = []
         self.overlay.click_regions = []
         self.overlay.hide()
@@ -531,6 +543,84 @@ class App:
             self.invalidate_page(); dialog.accept()
         buttons.accepted.connect(save); dialog.exec()
 
+    @staticmethod
+    def correction_key(language, text):
+        return hashlib.sha256((language+'\0'+text).encode()).hexdigest()
+
+    def build_translation_help(self, layout):
+        label = QLabel('Bespreek fouten met AI op basis van de oorspronkelijke Engelse tekst. Een aanvraag gaat naar Gemini en gebruikt API-tegoed. Pas een voorstel pas toe nadat je het hebt gecontroleerd.')
+        label.setWordWrap(True); layout.addWidget(label)
+        context = QLabel('AI-context: The Lord of the Rings: Journeys in Middle-earth · coöperatief bordspel · Midden-aarde · fantasy, onderzoeken en gevechten')
+        context.setWordWrap(True); layout.addWidget(context)
+        columns = QHBoxLayout()
+        original_column = QVBoxLayout(); original_column.addWidget(QLabel('Origineel Engels'))
+        self.original_preview = QTextEdit(); self.original_preview.setReadOnly(True)
+        original_column.addWidget(self.original_preview); columns.addLayout(original_column)
+        proposal_column = QVBoxLayout(); proposal_column.addWidget(QLabel('Huidige vertaling / AI-voorstel'))
+        self.review_preview = QTextEdit(); self.review_preview.setReadOnly(True)
+        proposal_column.addWidget(self.review_preview); columns.addLayout(proposal_column)
+        layout.addLayout(columns, 2)
+        self.review_chat = QPlainTextEdit(); self.review_chat.setReadOnly(True)
+        self.review_chat.setMaximumBlockCount(200); layout.addWidget(self.review_chat, 1)
+        self.review_instruction = QTextEdit()
+        self.review_instruction.setMaximumHeight(85)
+        self.review_instruction.setPlaceholderText('Bijvoorbeeld: deduction betekent hier logisch redeneren, niet aftrek. Controleer ook de rest met de Engelse tekst.')
+        layout.addWidget(self.review_instruction)
+        row = QHBoxLayout()
+        self.review_send = QPushButton('Vraag AI om verbetering'); self.review_send.clicked.connect(self.ask_translation_help)
+        row.addWidget(self.review_send)
+        self.review_apply = QPushButton('Gebruik verbeterde tekst'); self.review_apply.setEnabled(False)
+        self.review_apply.clicked.connect(self.apply_translation_help); row.addWidget(self.review_apply)
+        layout.addLayout(row)
+
+    def ask_translation_help(self):
+        if not self.review_blocks:
+            self.review_chat.appendPlainText('Laat eerst een spelpagina herkennen en vertalen.'); return
+        instruction = self.review_instruction.toPlainText().strip() or 'Controleer en verbeter deze vertaling in de context van het spel.'
+        self.review_chat.appendPlainText('Jij: '+instruction)
+        self.review_send.setEnabled(False); self.review_apply.setEnabled(False)
+        token = self.review_page
+        blocks = copy.deepcopy(self.review_blocks)
+        if self.review_result and self.review_result[0] == token:
+            for block, item in zip(blocks, self.review_result[1]['items']):
+                block.translated, block.narrated = item['translation'], item['narration']
+        key, model = self.speaker.keys.get('google', ''), self.ocr_model
+        output, narration = self.output_language, self.current_speech_language()
+        history = list(self.review_history)
+        if self.child_friendly: instruction += '\nBehoud ook deze kindvriendelijke stijl: '+self.child_instruction
+        def ask():
+            try:
+                from translationhelp import review
+                result = review(key, model, blocks, instruction, output, narration, history)
+                self.events.put(('review_answer', (token, result, instruction, '')))
+            except Exception as exc:
+                self.events.put(('review_answer', (token, None, instruction, str(exc)[:300])))
+        threading.Thread(target=ask, daemon=True).start()
+
+    def apply_translation_help(self):
+        if (not self.review_result or self.review_result[0] != self.review_page
+                or self.review_page[0] != self.epoch or self.overlay.blocks is not self.review_blocks):
+            self.review_chat.appendPlainText('Deze spelpagina is niet meer actueel; herken eerst de huidige pagina.'); return
+        result = self.review_result[1]
+        for block, item in zip(self.review_blocks, result['items']):
+            block.translated, block.narrated = normalize_spacing(item['translation']), normalize_spacing(item['narration'])
+            self.corrections[self.correction_key(self.output_language, block.text)] = block.translated
+            self.corrections[self.correction_key(self.current_speech_language(), block.text)] = block.narrated
+        try:
+            temporary = DATA/'corrections.tmp'
+            temporary.write_text(json.dumps(self.corrections, ensure_ascii=False), 'utf-8')
+            temporary.replace(DATA/'corrections.json')
+        except OSError:
+            self.review_chat.appendPlainText('De tekst is aangepast, maar opslaan voor later is mislukt.')
+        self.preview.setPlainText('\n\n'.join(b.translated for b in self.review_blocks))
+        self.latest_text = '\n\n'.join(b.narrated for b in self.review_blocks)
+        self.speaker.stop()
+        self.overlay.blocks = self.review_blocks
+        if self.target and self.enabled.is_set() and active_game(self.target):
+            self.overlay.render_blocks(client_box(self.target), self.review_blocks)
+        self.review_apply.setEnabled(False)
+        self.review_chat.appendPlainText('Toegepast op overlay en voorleestekst; correcties opgeslagen voor hergebruik.')
+
     def build_detection_settings(self, layout):
         title = QLabel('Eerst lokaal controleren of er genoeg tekst staat')
         title.setWordWrap(True); layout.addWidget(title)
@@ -560,13 +650,13 @@ class App:
         text.setHtml("""<h2>Hoe werkt de overlay?</h2>
         <p><b>1. Spelbeeld:</b> alleen het actieve Journeys in Middle-earth-venster of jouw gekozen tekstgebied wordt bekeken. Buiten het spel wordt de overlay verborgen; bij terugkeer komt de bestaande vertaling terug.</p>
         <p><b>2. Snelle detectie (lokaal):</b> de app zoekt mogelijke tekstregels met beeldanalyse. Dit is geen OCR en kost geen API-aanvraag. Bij minder dan de ingestelde hoeveelheid wacht de app op een volgend beeld.</p>
-        <p><b>3. Tekst herkennen (OCR):</b> pas daarna leest de gekozen provider de Engelse woorden en hun positie. Ingebouwd en Microsoft blijven lokaal; Gemini ontvangt het geselecteerde beeldgebied. De lokale teller blokkeert na standaard 5 Gemini OCR-aanvragen per minuut en vraagt bevestiging voor meer.</p>
+        <p><b>3. Tekst herkennen (OCR):</b> pas daarna leest de gekozen provider de Engelse woorden en hun positie. Ingebouwd en Microsoft blijven lokaal; Gemini ontvangt standaard alleen lokaal uitgesneden tekststroken uit het geselecteerde gebied, verkleind tot maximaal 1600 pixels. Als uitsnijden geen kleinere afbeelding oplevert, wordt het gekozen gebied verkleind verstuurd. De posities worden terugvertaald naar het spelbeeld. De lokale teller blokkeert na standaard 5 Gemini OCR-aanvragen per minuut en vraagt bevestiging voor meer.</p>
         <p><b>4. Vertalen:</b> de herkende Engelse tekst wordt lokaal vertaald naar de gekozen overlay- en voorleestaal. Gemini OCR is dus tekstherkenning, niet de gewone vertaler. Tekstblokken onder de minimumlengte worden overgeslagen.</p>
         <p><b>5. Kindvriendelijk (optioneel):</b> Gemini herschrijft de vertaalde tekst met jouw instructie. Dit is een aparte online aanvraag; de OCR-teller telt deze niet mee.</p>
         <p><b>6. Tonen:</b> de app controleert of de tekst nog op dezelfde pagina staat en legt de vertaling over het Engels. Ongewijzigde tekst wordt hergebruikt; animatie buiten tekstgebieden hoeft geen nieuwe OCR-aanvraag te veroorzaken.</p>
         <p><b>7. Voorlezen:</b> de gekozen stem leest de vertaling. Een ingestelde gedeelde audiocache wordt eerst geraadpleegd. Zonder opname maakt de provider nieuwe audio; met uploadsleutel kan die worden gedeeld. Optioneel wordt alleen het spelgeluid tijdelijk zachter.</p>
         <p><b>Wat gaat online?</b> Gemini OCR: spelbeeldgebied. Kindvriendelijk: vertaalde tekst. Online spraak: voorleestekst. Audiocache: audio plus een technische cachesleutel, geen screenshot of provider-API-sleutel. Ingebouwde/Microsoft OCR, lokale vertaling en Piper werken lokaal.</p>
-        <p><b>Problemen?</b> Bekijk Detectie voor gevonden regels en meettijd. Debuglogs toont focus, OCR-tijden, filters, vertalen en cache. Alleen wacht- en foutmeldingen verschijnen in de speloverlay.</p>""")
+        <p><b>Vertaalhulp:</b> op dit tabblad staan het originele Engels en de huidige vertaling. Bespreek fouten met Gemini en controleer het voorstel vóór toepassen. Goedgekeurde correcties worden lokaal opgeslagen. Deze AI-aanvragen staan los van de OCR-teller.</p><p><b>Problemen?</b> Bekijk Detectie voor gevonden regels en meettijd. Debuglogs toont focus, OCR-tijden, filters, vertalen en cache. Alleen wacht- en foutmeldingen verschijnen in de speloverlay.</p>""")
         layout.addWidget(text)
 
     def change_ducking(self, _value):
@@ -629,6 +719,9 @@ class App:
         layout.addRow(help_button)
         model = QComboBox(); model.setEditable(True); model.addItems(['gemini-3.8-flash', 'gemini-2.5-flash'])
         model.setCurrentText(self.ocr_model); layout.addRow('Beeldmodel (geen TTS-model)', model)
+        crop = QCheckBox('Tekststroken uitsnijden vóór verzenden (kleiner beeld)')
+        crop.setChecked(self.ocr_crop); layout.addRow(crop)
+        crop.setToolTip('Verkleint de afbeelding en herstelt posities op het spelbeeld. Zet uit als tekst wordt gemist.')
         interval = QSpinBox(); interval.setRange(1, 120); interval.setValue(self.ocr_limit); interval.setSuffix(' aanvragen/minuut')
         layout.addRow('Limiet vóór bevestiging', interval)
         rate_hint = QLabel('Geen vaste wachttijd. Bij de limiet stopt de app en vraagt toestemming voor een extra blok aanvragen. Ook de testknop telt mee; hergebruik van dezelfde afbeelding niet.')
@@ -648,6 +741,8 @@ class App:
                 QMessageBox.warning(dialog, 'Opslaan mislukt', 'Windows kon de sleutel niet versleuteld opslaan.'); return
             self.ocr_model, self.ocr_limit = model.currentText().strip(), interval.value()
             self.ocr_budget.limit = self.ocr_limit
+            self.ocr_crop = crop.isChecked()
+            self.preferences.setValue('gemini_crop_text', self.ocr_crop)
             self.preferences.setValue('ocr_model', self.ocr_model)
             self.preferences.setValue('ocr_requests_per_minute', self.ocr_limit)
             self.preferences.sync(); self.ocr_revision += 1; self.epoch += 1
@@ -683,7 +778,7 @@ class App:
         options = {}
         if provider == 'gemini':
             revision = self.ocr_revision
-            options = dict(key=self.speaker.keys.get('google', ''), model=self.ocr_model, budget=self.ocr_budget,
+            options = dict(key=self.speaker.keys.get('google', ''), model=self.ocr_model, budget=self.ocr_budget, crop_text=self.ocr_crop, on_image=self.trace,
                 on_wait=lambda: self.events.put(('ocr_wait', self.epoch)),
                 cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
         return Recognizer(provider, **options)
@@ -942,9 +1037,9 @@ class App:
                     if code not in translators: translators[code] = Translator(code)
                 for block in sorted(blocks, key=lambda b: -len(b.text)):
                     if self.closing.is_set() or epoch != self.epoch: break
-                    block.translated = translators[output_language].translate(block.text)
+                    block.translated = getattr(self, 'corrections', {}).get(self.correction_key(output_language, block.text)) or translators[output_language].translate(block.text)
                     block.narrated = (block.translated if narration_language == output_language
-                                      else translators[narration_language].translate(block.text))
+                                      else (getattr(self, 'corrections', {}).get(self.correction_key(narration_language, block.text)) or translators[narration_language].translate(block.text)))
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 if child_enabled:
                     self.events.put(('status', 'Kindvriendelijke tekst maken…'))
@@ -1006,6 +1101,20 @@ class App:
                 break
             if kind == 'diagnostic':
                 self.debug_view.appendPlainText(value)
+            elif kind == 'review_answer':
+                token, result, instruction, error = value
+                self.review_send.setEnabled(True)
+                if token != self.review_page:
+                    self.review_chat.appendPlainText('De spelpagina is gewijzigd; dit voorstel wordt niet toegepast.')
+                elif error:
+                    self.review_chat.appendPlainText('AI: '+error)
+                else:
+                    self.review_result = (token, result)
+                    self.review_preview.setPlainText('\n\n'.join(i['translation'] for i in result['items']))
+                    self.review_chat.appendPlainText('AI: '+result['explanation'])
+                    self.review_history += [{'user': instruction, 'assistant': result['explanation']}]
+                    self.review_history = self.review_history[-6:]
+                    self.review_apply.setEnabled(True)
             elif kind == 'detect_status':
                 self.detect_status.setText(value)
             elif kind == 'detection_empty' and value == self.epoch:
@@ -1077,6 +1186,14 @@ class App:
             elif kind == 'render':
                 epoch, hwnd, box, blocks, signature = value
                 if epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
+                token = (epoch, hwnd, signature)
+                if token != self.review_page:
+                    self.review_page, self.review_blocks = token, blocks
+                    self.review_result, self.review_history = None, []
+                    self.review_apply.setEnabled(False); self.review_chat.clear()
+                    self.original_preview.setPlainText('\n\n'.join(b.text for b in blocks))
+                    self.review_preview.setPlainText('\n\n'.join(b.translated for b in blocks))
+                self.review_blocks = blocks
                 self.trace(f'Overlay getoond: {len(blocks)} vertaalde blokken')
                 self.overlay.progress_text = ''
                 self.overlay.render_blocks(box, blocks)

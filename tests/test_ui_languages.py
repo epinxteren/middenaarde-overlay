@@ -137,6 +137,20 @@ class UiLanguageTests(unittest.TestCase):
         self.assertTrue(self.app.enabled.is_set())
         self.assertEqual(self.app.ocr_budget.extra, 5)
 
+    def test_review_applies_to_current_page_and_persists_but_rejects_old_page(self):
+        blocks = self.render()
+        result = {'explanation': 'Verbeterd', 'items': [{'id': '0', 'translation': 'Gebruik logisch redeneren.', 'narration': 'Gebruik logisch redeneren.'}]}
+        self.app.review_result = (self.app.review_page, result)
+        self.app.apply_translation_help()
+        self.assertEqual(blocks[0].translated, 'Gebruik logisch redeneren.')
+        self.assertEqual(self.app.latest_text, 'Gebruik logisch redeneren.')
+        self.assertTrue((Path(self.folder.name)/'corrections.json').exists())
+        self.app.review_result = (self.app.review_page, result)
+        self.app.epoch += 1
+        result['items'][0]['translation'] = 'Mag niet worden toegepast'
+        self.app.apply_translation_help()
+        self.assertEqual(blocks[0].translated, 'Gebruik logisch redeneren.')
+
     def test_missing_model_pauses_and_requires_explicit_download(self):
         self.app.enabled.set()
         with patch('qtui.model_available', side_effect=lambda lang, *_: lang != 'de'), \

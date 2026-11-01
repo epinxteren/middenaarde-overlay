@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class Detection:
     lines: int
     layout: tuple
+    boxes: tuple = ()
 
 
 def detect_text(image):
@@ -36,4 +37,5 @@ def detect_text(image):
                 break
         else: rows.append([center, height, x, x+width])
     layout = tuple((round(y/12), round(left/20), round(right/20)) for y, _, left, right in rows)
-    return Detection(len(rows), layout)
+    boxes = tuple((x/factor, y/factor, (x+w)/factor, (y+h)/factor) for x, y, w, h in candidates)
+    return Detection(len(rows), layout, boxes)
