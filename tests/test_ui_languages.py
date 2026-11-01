@@ -130,6 +130,7 @@ class WorkerLanguageTests(unittest.TestCase):
                 self.count += 1
                 return self.count > 3
         class Recognizer:
+            backend, warning = 'Test OCR', ''
             async def read(self, image):
                 return [Block('The heroes enter the forest.', 1, 2, 200, 100, 20)]
         import queue
@@ -140,6 +141,8 @@ class WorkerLanguageTests(unittest.TestCase):
         app.events = queue.Queue()
         app.epoch, app.region, app.min_chars = 0, None, 0
         app.output_language, app.narration_choice = 'de', 'fr'
+        app.ocr_provider, app.ocr_revision = 'portable', 0
+        app.create_recognizer = lambda provider: Recognizer()
         def translator(language):
             model = MagicMock()
             model.translate.side_effect = lambda text: language + ': ' + text

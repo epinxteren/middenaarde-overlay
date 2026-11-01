@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.2.4).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.3.0).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -18,16 +18,36 @@ Version 0.2.2 also accepts case-insensitive Google PCM MIME types and decodes co
 6. In the companion app, wait for **Gereed**, click **Start overlay**, then click the game window.
 7. Wait a few seconds on a stable text screen. Dutch text appears in dark, opaque panels over the detected English text. Mouse clicks pass through the panels to the game. Longer text is spoken automatically.
 
-Use the same ZIP and steps on another Windows PC. Both the translation model and Dutch voice are included; after download, the app works offline. The app only targets the `JiME.exe` game window and pauses capture when the game loses focus. Its own overlay is excluded from capture to prevent translation loops. It does not save screenshots. OCR and translation stay local; selecting an online voice sends the narration text in your selected language to that provider. Recognized text and translations are cached locally per language in `data/translations.json` (Dutch) or `data/translations-<language>.json` next to the EXE.
+Use the same ZIP and steps on another Windows PC. Both the translation model and Dutch voice are included; after download, the app works offline. The app only targets the `JiME.exe` game window and pauses capture when the game loses focus. Its own overlay is excluded from capture to prevent translation loops. It does not save screenshots. Built-in OCR, Windows OCR and translation stay local. Gemini OCR sends the selected game image region to Google; selecting an online voice sends the narration text in your selected language to that provider. Recognized text and translations are cached locally per language in `data/translations.json` (Dutch) or `data/translations-<language>.json` next to the EXE.
 
 ### Requirements
 
 - Windows 10 **version 2004 or newer**, or Windows 11; **64-bit x64**. ARM64 and 32-bit Windows are not tested.
-- English Windows OCR support. It was available on the development PC. If startup reports missing English OCR, add **English (United States)** in **Settings → Time & language → Language & region → Language options**, including its OCR/text-recognition feature where offered. You do not need to change your Windows display language. Managed PCs may require their administrator to add this optional Windows feature.
+- No Windows OCR language pack is required. The default built-in RapidOCR engine and its models are included. Microsoft Windows OCR is optional.
 - A CPU capable of running CTranslate2 and ONNX Runtime, and enough memory for the game plus two local models. GPU acceleration is not required. Performance on older hardware is unverified.
 - Keep the extracted app in a folder where you can write, such as Downloads or Documents. It stores its cache and log in its own `data` subfolder.
 
 The EXE is unsigned. If your Windows policy prevents it from running, use your normal trusted-software review process; do not disable Windows security protections. Source code and build instructions are provided below.
+
+## Text recognition / Tekstherkenning
+
+Version 0.3.0 offers three engines under **Tekstherkenning**:
+
+| Choice | Runs where | Requirements |
+| --- | --- | --- |
+| **Ingebouwd · offline** (default) | Your PC, RapidOCR / ONNX | All OCR models included in the ZIP; no Microsoft language downloads, no key |
+| **Windows OCR** | Your PC, Microsoft | Optional English Windows OCR language pack; automatically uses built-in OCR if unavailable |
+| **Google Gemini · online** | Google API | Google API key and image-capable Gemini model; uses account quota/credits |
+
+Choose an engine in the app; switching takes effect without restarting and is remembered in `data/ui.ini`. The label shows the active engine or a Windows fallback. On other PCs, extract the complete release ZIP including `_internal`; OCR does not download anything during gameplay.
+
+For Gemini, open **Gemini OCR-instellingen…**, enter your Google key, choose the image model (default `gemini-3.8-flash`, editable), and save. Do not choose a `tts` model for image recognition. The Google key is shared with Gemini narration and is stored using Windows DPAPI. Choosing an OCR provider does not change the narration provider. You can use built-in OCR with Gemini narration, or Gemini OCR with Piper narration.
+
+Gemini receives only the game window image or the region selected with **Kies tekstgebied**, resized to at most 1600 pixels per side. It returns English text and approximate positions; translation remains local. Images are not saved by the app. Your selected region may contain player names or other visible content, so limit it to the needed text panel. Model availability, quotas and pricing depend on your Google account.
+
+Identical images reuse a small in-memory OCR cache. Online requests are spaced at least 10 seconds apart by default (configurable from 5 to 120); animated areas can still create new requests. OCR pauses after a Gemini error, including quota errors; press **Start overlay** to explicitly retry. A new key or shorter interval does not increase Google's quota. Stable screens work best; a response is discarded if the captured image changed while processing. Bounding boxes and accuracy may differ between engines.
+
+**Nederlands:** laat **Ingebouwd · offline** geselecteerd als Microsoft zijn taalpakket niet wil installeren. Alles wat nodig is zit in de download. Google Gemini is een optionele online keuze, met eigen OCR-instellingen en API-verbruik.
 
 ## Controls
 
@@ -136,7 +156,7 @@ To run the integration check without starting the game:
 .venv\Scripts\python.exe src\selftest.py self-test.json
 ```
 
-This generates a synthetic English text image, runs real Windows OCR and local translation, synthesizes Dutch speech into `self-test.wav`, and checks capture exclusion for a test window. It opens a small temporary test window but does not advance your game or play audio. A successful JSON result contains `"result": "PASS"`.
+This generates a synthetic English text image, runs real bundled RapidOCR and local translation, synthesizes Dutch speech into `self-test.wav`, and checks capture exclusion for a test window. It opens a small temporary test window but does not advance your game or play audio. A successful JSON result contains `"result": "PASS"`.
 
 ## Build the standalone app
 
@@ -148,7 +168,7 @@ Double-click **BUILD.cmd**, or after the source setup run:
 
 The app is built into `dist/MiddenaardeOverlay/`. Copy `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `glossary.json` into that folder before distributing it. Distribute the **whole folder as a ZIP**, never just the EXE.
 
-The included **Build Windows app** GitHub Actions workflow builds on Windows and provides a downloadable artifact. It checks Python sources and attempts the native integration check; that native check is non-blocking because hosted runners may lack Windows OCR or a composed desktop. Run the local self-test on your own PC to check those features. Run the workflow under **Actions → Build Windows app → Run workflow**. Pushing a `v*` tag also creates a GitHub Release with the ready-to-run ZIP. The workflow needs repository contents-write permission to publish releases; it does not use any personal access token.
+The included **Build Windows app** GitHub Actions workflow builds on Windows and provides a downloadable artifact. It checks Python sources, provider contracts, bundled offline OCR and the packaged executable. These checks must pass before release. Run the local self-test on your own PC to check those features. Run the workflow under **Actions → Build Windows app → Run workflow**. Pushing a `v*` tag also creates a GitHub Release with the ready-to-run ZIP. The workflow needs repository contents-write permission to publish releases; it does not use any personal access token.
 
 Pushes to `main` also build a downloadable artifact. For publication, a `main` commit whose message starts with `[release]` publishes version `v0.2.2` automatically. For future versions, update the app version and workflow fallback tag, or publish a matching new `v*` tag.
 
@@ -174,6 +194,6 @@ git push origin v0.2.2
 
 ## How it works and licensing
 
-Windows OCR → paragraph grouping and stable-page check → local CTranslate2 / Argos English-to-selected-language model → transparent, click-through Qt window → selected Piper, Microsoft Edge, Google Gemini, ElevenLabs or Azure narration. A small exact-match glossary and disk cache reduce repeat work. The overlay is a separate app; it is not a game mod and does not bundle the game's copyrighted text, artwork or save files.
+Selected OCR engine → paragraph grouping and stable-page check → local CTranslate2 / Argos English-to-selected-language model → transparent, click-through Qt window → selected Piper, Microsoft Edge, Google Gemini, ElevenLabs or Azure narration. A small exact-match glossary and disk cache reduce repeat work. The overlay is a separate app; it is not a game mod and does not bundle the game's copyrighted text, artwork or save files.
 
 App source: **GPL-3.0-or-later**. Models and dependencies retain their own licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), including attribution to the OPUS-MT authors and Piper/MLS voice dataset. No affiliation with Fantasy Flight Games, Middle-earth Enterprises, Google or Steam.

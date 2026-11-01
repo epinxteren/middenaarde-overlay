@@ -21,8 +21,7 @@ jobs:
         run: python -m compileall -q src
       - name: Test speech provider contracts
         run: python -m unittest discover -s tests -v
-      - name: Try native OCR, speech and overlay test
-        continue-on-error: true
+      - name: Test bundled OCR, speech and overlay
         run: python src/selftest.py self-test.json
       - run: python -m PyInstaller --noconfirm MiddenaardeOverlay.spec
       - name: Verify bundled speech dependencies
@@ -49,7 +48,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') || startsWith(github.event.head_commit.message, '[release]')
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.2.4' }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.3.0' }}
         shell: pwsh
         run: |
           gh release view $env:RELEASE_TAG *> $null

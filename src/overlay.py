@@ -27,7 +27,7 @@ from translation import Translator
 RESOURCE = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 HOME = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 DATA = HOME / 'data'
-VERSION = '0.2.4'
+VERSION = '0.3.0'
 user32 = C.WinDLL('user32', use_last_error=True)
 kernel32 = C.WinDLL('kernel32', use_last_error=True)
 try:
@@ -169,7 +169,7 @@ def group_lines(lines):
     return blocks
 
 
-class Recognizer:
+class WindowsRecognizer:
     def __init__(self):
         from winrt.windows.media.ocr import OcrEngine
         from winrt.windows.globalization import Language
@@ -197,6 +197,29 @@ class Recognizer:
             return blocks
         finally:
             bitmap.close()
+
+
+class Recognizer:
+    def __init__(self, provider='portable', **options):
+        self.warning = ''
+        if provider == 'gemini':
+            from gemini_ocr import GeminiRecognizer
+            self.engine = GeminiRecognizer(**options)
+            self.backend = 'Gemini OCR · online: beeldgebied wordt naar Google gestuurd'
+            return
+        if provider == 'windows':
+            try:
+                self.engine = WindowsRecognizer()
+                self.backend = 'Windows OCR'
+                return
+            except Exception:
+                self.warning = 'Windows OCR niet beschikbaar; ingebouwde OCR wordt gebruikt.'
+        from portable_ocr import PortableRecognizer
+        self.engine = PortableRecognizer()
+        self.backend = 'Ingebouwde OCR'
+
+    async def read(self, image):
+        return await self.engine.read(image)
 
 
 

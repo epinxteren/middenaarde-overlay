@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter, QSettings
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox, QComboBox, QScrollArea)
+                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox, QComboBox, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QScrollArea)
 from PIL import ImageGrab
 from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_handle,
                      find_game, client_box, active_game)
@@ -20,6 +20,7 @@ from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_hand
 
 from speech import Speaker
 from voiceui import VoiceDialog
+from gemini_ocr import OCRError
 from languages import LANGUAGES, language_code, speech_language
 from languagepacks import model_available, install_language
 
@@ -192,6 +193,11 @@ class App:
         self.epoch = 0
         self.region = None
         self.preferences = QSettings(str(DATA/'ui.ini'), QSettings.Format.IniFormat)
+        self.ocr_provider = self.preferences.value('ocr_provider', 'portable', type=str)
+        if self.ocr_provider not in ('portable', 'windows', 'gemini'): self.ocr_provider = 'portable'
+        self.ocr_model = self.preferences.value('ocr_model', 'gemini-3.8-flash', type=str)
+        self.ocr_interval = self.preferences.value('ocr_interval', 10, type=int)
+        self.ocr_revision = 0
         self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
         self.output_language = language_code(self.preferences.value('overlay_language', 'nl'))
         self.narration_choice = self.preferences.value('narration_language', 'same')
@@ -253,6 +259,22 @@ class App:
         voice_button = QPushButton('Stem && providers…')
         voice_button.clicked.connect(self.voice_settings)
         layout.addWidget(voice_button)
+        ocr_row = QHBoxLayout()
+        ocr_row.addWidget(QLabel('Tekstherkenning'))
+        self.ocr_choice = QComboBox()
+        self.ocr_choice.addItem('Ingebouwd · offline (aanbevolen)', 'portable')
+        self.ocr_choice.addItem('Windows OCR · met automatische terugval', 'windows')
+        self.ocr_choice.addItem('Google Gemini · online', 'gemini')
+        self.ocr_choice.setCurrentIndex(self.ocr_choice.findData(self.ocr_provider))
+        self.ocr_choice.currentIndexChanged.connect(self.change_ocr)
+        ocr_row.addWidget(self.ocr_choice, 1)
+        layout.addLayout(ocr_row)
+        self.ocr_label = QLabel('OCR laden…')
+        self.ocr_label.setWordWrap(True)
+        layout.addWidget(self.ocr_label)
+        ocr_settings = QPushButton('Gemini OCR-instellingen…')
+        ocr_settings.clicked.connect(self.google_ocr_settings)
+        layout.addWidget(ocr_settings)
         language_row = QHBoxLayout()
         language_row.addWidget(QLabel('Taal overlaytekst'))
         self.overlay_language = QComboBox()
@@ -368,6 +390,7 @@ class App:
         if dialog.exec():
             self.voice_ok = True
             self.spoken.clear()
+            self.ocr_revision += 1
             self.refresh_language_controls()
         self.voice_dialog = None
 
@@ -376,6 +399,51 @@ class App:
 
     def repeat(self):
         if self.latest_text: self.speaker.say(self.latest_text, language=self.current_speech_language())
+
+    def google_ocr_settings(self):
+        dialog = QDialog(self.root); dialog.setWindowTitle('Gemini OCR-instellingen')
+        layout = QFormLayout(dialog)
+        notice = QLabel('Alleen bij Google Gemini: het gekozen spelbeeldgebied gaat naar Google.\nDit gebruikt API-tegoed. Deze sleutel wordt ook voor Gemini-spraak gebruikt.')
+        notice.setWordWrap(True); layout.addRow(notice)
+        key = QLineEdit(self.speaker.keys.get('google', '')); key.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addRow('Google API-sleutel', key)
+        model = QComboBox(); model.setEditable(True); model.addItems(['gemini-3.8-flash', 'gemini-2.5-flash'])
+        model.setCurrentText(self.ocr_model); layout.addRow('Beeldmodel (geen TTS-model)', model)
+        interval = QSpinBox(); interval.setRange(5, 120); interval.setValue(self.ocr_interval); interval.setSuffix(' seconden')
+        layout.addRow('Minimale tijd tussen aanvragen', interval)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        layout.addRow(buttons); buttons.rejected.connect(dialog.reject)
+        def save():
+            keys = dict(self.speaker.keys); keys['google'] = key.text().strip()
+            try: self.speaker.save(self.speaker.settings, keys)
+            except OSError:
+                QMessageBox.warning(dialog, 'Opslaan mislukt', 'Windows kon de sleutel niet versleuteld opslaan.'); return
+            self.ocr_model, self.ocr_interval = model.currentText().strip(), interval.value()
+            self.preferences.setValue('ocr_model', self.ocr_model)
+            self.preferences.setValue('ocr_interval', self.ocr_interval)
+            self.preferences.sync(); self.ocr_revision += 1; self.epoch += 1
+            self.overlay.hide(); dialog.accept()
+        buttons.accepted.connect(save); dialog.exec()
+
+    def create_recognizer(self, provider):
+        options = {}
+        if provider == 'gemini':
+            revision = self.ocr_revision
+            options = dict(key=self.speaker.keys.get('google', ''), model=self.ocr_model, interval=self.ocr_interval,
+                on_wait=lambda: self.events.put(('ocr_wait', self.epoch)),
+                cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
+        return Recognizer(provider, **options)
+
+    def change_ocr(self):
+        self.ocr_provider = self.ocr_choice.currentData()
+        self.preferences.setValue('ocr_provider', self.ocr_provider)
+        self.preferences.sync()
+        self.epoch += 1
+        self.overlay.hide()
+        self.speaker.stop()
+        self.latest_text = ''
+        self.preview.clear()
+        self.ocr_label.setText('Google Gemini: beeldgebied gaat online naar Google; gebruikt API-tegoed.' if self.ocr_provider == 'gemini' else 'OCR wisselen…')
 
     def click_speech(self, text):
         if self.speaker.busy and self.speaker.current_text == text:
@@ -504,7 +572,10 @@ class App:
 
     def worker(self):
         try:
-            translators, recognizer = {}, Recognizer()
+            selected_ocr = self.ocr_provider
+            selected_revision = self.ocr_revision
+            translators, recognizer = {}, self.create_recognizer(selected_ocr)
+            self.events.put(('ocr_ready', (selected_ocr, recognizer.warning or recognizer.backend)))
             self.events.put(('ready', None))
         except Exception as exc:
             logging.exception('Initialization')
@@ -515,6 +586,17 @@ class App:
         previous, rendered, previous_epoch = None, None, -1
         while not self.closing.is_set():
             if self.closing.wait(0.65): break
+            if self.ocr_provider != selected_ocr or self.ocr_revision != selected_revision:
+                selected_ocr = self.ocr_provider
+                selected_revision = self.ocr_revision
+                try:
+                    replacement = self.create_recognizer(selected_ocr)
+                    recognizer = replacement
+                    self.events.put(('ocr_ready', (selected_ocr, recognizer.warning or recognizer.backend)))
+                    previous = rendered = None
+                except Exception:
+                    logging.exception('OCR switch')
+                    self.events.put(('ocr_ready', (selected_ocr, 'OCR wisselen mislukt; vorige herkenning blijft actief.')))
             if not self.enabled.is_set(): continue
             try:
                 hwnd = find_game()
@@ -542,6 +624,7 @@ class App:
                     grab_box = (x+offset[0], y+offset[1], x+int(width*c), y+int(height*d))
                 image = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 blocks = loop.run_until_complete(recognizer.read(image))
+                if selected_ocr == 'gemini': self.events.put(('ocr_wait_done', epoch))
                 blocks = [b for b in blocks if len(b.text.strip()) >= minimum]
                 for block in blocks:
                     block.x += offset[0]; block.y += offset[1]
@@ -571,13 +654,23 @@ class App:
                                       else translators[narration_language].translate(block.text))
                 if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
                 fresh = ImageGrab.grab(bbox=grab_box, all_screens=True)
-                fresh_blocks = loop.run_until_complete(recognizer.read(fresh))
+                if selected_ocr == 'gemini':
+                    # Validate locally instead of paying for a second image request.
+                    if fresh.size != image.size or fresh.tobytes() != image.tobytes():
+                        previous = rendered = None
+                        continue
+                    fresh_blocks = blocks
+                else:
+                    fresh_blocks = loop.run_until_complete(recognizer.read(fresh))
                 fresh_blocks = [b for b in fresh_blocks if len(b.text.strip()) >= minimum]
                 if [b.text for b in fresh_blocks] != [b.text for b in blocks]:
                     previous = rendered = None
                     continue
                 self.events.put(('render', (epoch, hwnd, box, blocks, signature)))
                 rendered = signature
+            except OCRError as exc:
+                self.enabled.clear()
+                self.events.put(('ocr_failed', str(exc)))
             except Exception as exc:
                 logging.exception('Capture / translation')
                 self.events.put(('clear', self.epoch))
@@ -592,7 +685,19 @@ class App:
                 kind, value = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == 'ready':
+            if kind == 'ocr_ready':
+                provider, message = value
+                if provider == self.ocr_provider: self.ocr_label.setText(message)
+            elif kind == 'ocr_wait' and value == self.epoch:
+                self.show_progress('Tekst herkennen…')
+            elif kind == 'ocr_wait_done' and value == self.epoch:
+                if self.overlay.progress_text == 'Tekst herkennen…': self.show_progress('')
+            elif kind == 'ocr_failed':
+                self.start_button.setText('Start overlay')
+                self.status.setText(value+' · OCR gepauzeerd; klik Start overlay om opnieuw te proberen.')
+                self.speaker.stop()
+                self.overlay.hide()
+            elif kind == 'ready':
                 self.ready = True
                 self.status.setText('Gereed · start de overlay en klik in het spel')
                 self.refresh_language_controls()

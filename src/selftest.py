@@ -19,7 +19,10 @@ def run(output):
     draw.text((30, 35), 'The heroes travel through the forest.', fill='#181818', font=font)
     draw.text((30, 75), 'An enemy appears near the old bridge.', fill='#181818', font=font)
     draw.text((820, 200), 'Continue', fill='#181818', font=font)
-    blocks = asyncio.run(overlay.Recognizer().read(image))
+    from unittest.mock import patch
+    with patch.object(overlay, 'WindowsRecognizer', side_effect=AssertionError('Windows OCR must not be used')):
+        recognizer = overlay.Recognizer()
+        blocks = asyncio.run(recognizer.read(image))
     story = next(b for b in blocks if 'forest' in b.text)
     assert 'bridge' in story.text, [b.text for b in blocks]
     assert any(b.text == 'Continue' for b in blocks)
@@ -81,7 +84,7 @@ def run(output):
         assert dialog.settings['provider'] == provider
     dialog.close()
     root.close()
-    result = {'version': overlay.VERSION, 'ocr': [b.text for b in blocks],
+    result = {'version': overlay.VERSION, 'ocr_backend': recognizer.backend, 'ocr': [b.text for b in blocks],
               'translation': nl, 'speech_seconds': round(frames/rate, 2),
               'capture_exclusion': True, 'click_through': True, 'overlay_render': True,
               'dpapi': True, 'audio_decode': True, 'voice_dialog': True, 'result': 'PASS'}

@@ -7,7 +7,7 @@ root = Path(SPECPATH)
 datas = []
 binaries = []
 hiddenimports = []
-for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper', 'edge_tts', 'miniaudio', 'certifi']:
+for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper', 'edge_tts', 'miniaudio', 'certifi', 'rapidocr_onnxruntime']:
     d, b, h = collect_all(package)
     datas += d
     binaries += b
@@ -19,7 +19,7 @@ datas += [(str(root/'model'/'translate-en_nl-1_8'/'model'), 'model/translate-en_
           (str(root/'model'/'translate-en_nl-1_8'/'sentencepiece.model'), 'model/translate-en_nl-1_8'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx'), 'voice'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx.json'), 'voice')]
-for package in ['piper-tts', 'PySide6-Essentials', 'shiboken6', 'ctranslate2', 'sentencepiece',
+for package in ['rapidocr-onnxruntime', 'opencv-python', 'Shapely', 'pyclipper', 'six', 'tqdm', 'piper-tts', 'PySide6-Essentials', 'shiboken6', 'ctranslate2', 'sentencepiece',
                 'onnxruntime', 'numpy', 'Pillow', 'winrt-runtime', 'PyYAML', 'protobuf',
                 'edge-tts', 'miniaudio', 'aiohttp', 'certifi', 'cffi', 'pycparser', 'tabulate', 'aiohappyeyeballs', 'aiosignal', 'attrs', 'frozenlist', 'multidict', 'propcache', 'yarl', 'idna', 'flatbuffers', 'pathvalidate', 'packaging', 'typing_extensions', 'pyinstaller']:
     distribution = importlib.metadata.distribution(package)
@@ -28,6 +28,9 @@ for package in ['piper-tts', 'PySide6-Essentials', 'shiboken6', 'ctranslate2', '
             source = Path(distribution.locate_file(file))
             if source.is_file():
                 datas.append((str(source), 'licenses/'+package+'/'+str(Path(file).parent).replace('..', '_')))
+# Some Python distributions bundle an additional SSL trust-policy file.
+ssl_policy = Path(sys.base_prefix)/'Lib'/'codex-rejected-cas.pem'
+if ssl_policy.is_file(): datas.append((str(ssl_policy), '.'))
 python_license = Path(sys.base_prefix)/'LICENSE.txt'
 if python_license.is_file(): datas.append((str(python_license), 'licenses/CPython'))
 
@@ -39,6 +42,12 @@ a = Analysis([str(root/'src'/'launcher.py')], pathex=[str(root/'src')],
 # Qt uses Windows' unversioned ICU ABI. Never collect an unrelated Conda/Poppler
 # icuuc.dll found on the build machine PATH: its exports use versioned suffixes.
 a.binaries = [entry for entry in a.binaries if Path(entry[0]).name.lower() != 'icuuc.dll']
+# Keep Python's matching OpenSSL DLLs; unrelated DLLs on PATH may break TLS.
+for index, entry in enumerate(a.binaries):
+    name = Path(entry[0]).name
+    if name.lower().startswith(('libssl-', 'libcrypto-')):
+        matching = Path(sys.base_prefix)/'DLLs'/name
+        if matching.is_file(): a.binaries[index] = (entry[0], str(matching), entry[2])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='MiddenaardeOverlay',
           console=False, debug=False, strip=False, upx=False)

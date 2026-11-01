@@ -57,3 +57,7 @@ Additional dependency notices are retained under `_internal/` and `licenses/` in
 - miniaudio Python binding (MIT), https://github.com/irmen/pyminiaudio; decodes returned MP3 audio.
 - aiohttp and related dependencies retain their licenses, bundled in `_internal/licenses`.
 - Google Gemini, ElevenLabs and Azure APIs are external services governed by their own account terms. No API keys or provider voices are bundled.
+
+## Bundled offline OCR
+
+RapidOCR ONNX Runtime 1.4.4 (Apache-2.0), https://github.com/RapidAI/RapidOCR, includes PaddleOCR-derived PP-OCRv4 detection/recognition and text-orientation ONNX models. These models ship with the app; no runtime model download is used. OpenCV (Apache-2.0), Shapely (BSD-3-Clause, with GEOS under LGPL), and pyclipper (MIT with Clipper under Boost Software License) retain their bundled license notices in `_internal/licenses`.
