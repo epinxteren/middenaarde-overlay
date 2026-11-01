@@ -20,3 +20,7 @@ rapidocr-onnxruntime==1.4.4
 opencv-python==5.0.0.93
 Shapely==2.2.0
 pyclipper==1.4.0
+
+pycaw==20260927
+comtypes==1.4.17
+psutil==7.2.2

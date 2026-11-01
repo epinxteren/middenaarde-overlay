@@ -170,6 +170,7 @@ class Speaker:
         self.closed = False
         self.busy = False
         self.current_text = ''
+        self.duck_enabled, self.duck_level = False, 30
         self.lock = threading.Lock()
         self.cache = {}
         from sharedcache import SharedAudioCache
@@ -239,12 +240,14 @@ class Speaker:
                     path = self.data/f'playback-{generation % 2}.wav'
                     with wave.open(str(path), 'wb') as target:
                         target.setparams(params); target.writeframes(pcm)
-                    with self.lock:
-                        if generation != self.generation or self.closed: break
-                        winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
-                    self.events.put(('speech_status', (generation, '')))
-                    deadline = time.monotonic()+duration
-                    while generation == self.generation and not self.closed and time.monotonic()<deadline: time.sleep(.05)
+                    from gameducking import duck_game
+                    with duck_game(self.duck_enabled, self.duck_level):
+                        with self.lock:
+                            if generation != self.generation or self.closed: break
+                            winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+                        self.events.put(('speech_status', (generation, '')))
+                        deadline = time.monotonic()+duration
+                        while generation == self.generation and not self.closed and time.monotonic()<deadline: time.sleep(.05)
                 if generation == self.generation and not self.closed:
                     self.busy = False
                     self.events.put(('speech_status', (generation, '')))

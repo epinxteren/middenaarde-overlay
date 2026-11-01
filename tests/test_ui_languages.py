@@ -124,6 +124,19 @@ class UiLanguageTests(unittest.TestCase):
         self.assertTrue(self.app.cache_enabled.isChecked())
         self.assertEqual(self.app.cache_url.text(), '')
 
+    def test_quota_requires_confirmation_before_resuming(self):
+        self.app.enabled.clear()
+        with patch('qtui.QMessageBox.question', return_value=qtui.QMessageBox.StandardButton.No):
+            self.app.events.put(('ocr_quota', ('Limiet', ('overlay',))))
+            self.app.poll()
+        self.assertFalse(self.app.enabled.is_set())
+        self.assertEqual(self.app.ocr_budget.extra, 0)
+        with patch('qtui.QMessageBox.question', return_value=qtui.QMessageBox.StandardButton.Yes):
+            self.app.events.put(('ocr_quota', ('Limiet', ('overlay',))))
+            self.app.poll()
+        self.assertTrue(self.app.enabled.is_set())
+        self.assertEqual(self.app.ocr_budget.extra, 5)
+
     def test_missing_model_pauses_and_requires_explicit_download(self):
         self.app.enabled.set()
         with patch('qtui.model_available', side_effect=lambda lang, *_: lang != 'de'), \

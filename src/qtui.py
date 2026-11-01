@@ -23,7 +23,7 @@ from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_hand
 from translation import normalize_spacing
 from speech import Speaker
 from voiceui import VoiceDialog
-from gemini_ocr import OCRError
+from gemini_ocr import OCRError, OCRBudgetExceeded, RequestBudget
 from keyhelp import show_key_help
 from childfriendly import ChildFriendlyRewriter, ChildFriendlyError, DEFAULT_INSTRUCTION
 from languages import LANGUAGES, language_code, speech_language
@@ -201,7 +201,8 @@ class App:
         self.ocr_provider = self.preferences.value('ocr_provider', 'portable', type=str)
         if self.ocr_provider not in ('portable', 'windows', 'gemini'): self.ocr_provider = 'portable'
         self.ocr_model = self.preferences.value('ocr_model', 'gemini-3.8-flash', type=str)
-        self.ocr_interval = self.preferences.value('ocr_interval', 10, type=int)
+        self.ocr_limit = self.preferences.value('ocr_requests_per_minute', 5, type=int)
+        self.ocr_budget = RequestBudget(self.ocr_limit)
         self.ocr_revision = 0
         self.child_friendly = self.preferences.value('child_friendly', False, type=bool)
         self.child_pause = self.preferences.value('child_pause_on_error', True, type=bool)
@@ -262,13 +263,13 @@ class App:
         self.tabs = QTabWidget()
         window_layout.addWidget(self.tabs, 1)
         pages = {}
-        for name in ('Overzicht', 'Tekstherkenning', 'Talen & stem', 'Kindvriendelijk', 'Audiocache', 'Debuglogs'):
+        for name in ('Overzicht', 'Tekstherkenning', 'Talen / Stem', 'Kindvriendelijk', 'Audiocache', 'Debuglogs'):
             scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
             page = QWidget(); section = QVBoxLayout(page)
             section.setContentsMargins(18, 14, 18, 14); section.setSpacing(10)
             scroll.setWidget(page); self.tabs.addTab(scroll, name); pages[name] = section
         overview = pages['Overzicht']
-        layout = pages['Talen & stem']
+        layout = pages['Talen / Stem']
         self.read_aloud = QCheckBox('Verhaaltekst automatisch voorlezen')
         self.read_aloud.setChecked(True)
         self.read_aloud.toggled.connect(self.voice_toggle)
@@ -293,7 +294,7 @@ class App:
         self.google_panel = QWidget()
         self.google_panel.setVisible(self.ocr_provider == 'gemini')
         layout.addWidget(self.google_panel)
-        layout = pages['Talen & stem']
+        layout = pages['Talen / Stem']
         language_row = QHBoxLayout()
         language_row.addWidget(QLabel('Taal overlaytekst'))
         self.overlay_language = QComboBox()
@@ -348,11 +349,24 @@ class App:
         self.minimum_length.valueChanged.connect(self.change_minimum_length)
         length_row.addWidget(self.minimum_length, 1)
         layout.addLayout(length_row)
-        layout = pages['Talen & stem']
+        layout = pages['Talen / Stem']
         self.click_to_speak = QCheckBox('Klik op vertaling om voor te lezen / stoppen')
         self.click_to_speak.setChecked(self.preferences.value('click_to_speak', True, type=bool))
         self.click_to_speak.toggled.connect(self.change_click_to_speak)
         layout.addWidget(self.click_to_speak)
+        self.duck_box = QCheckBox('Spelgeluid zachter tijdens voorlezen')
+        self.duck_box.setChecked(self.preferences.value('duck_game_audio', False, type=bool))
+        layout.addWidget(self.duck_box)
+        duck_row = QHBoxLayout(); duck_row.addWidget(QLabel('Spelvolume tijdens voorlezen'))
+        self.duck_level = QSpinBox(); self.duck_level.setRange(0, 100)
+        self.duck_level.setValue(self.preferences.value('duck_game_percent', 30, type=int))
+        self.duck_level.setSuffix(' % van normaal')
+        self.duck_level.setEnabled(self.duck_box.isChecked())
+        duck_row.addWidget(self.duck_level); layout.addLayout(duck_row)
+        duck_note = QLabel('Alleen het spel wordt zachter. Na voorlezen of stoppen keert het oorspronkelijke volume terug.')
+        duck_note.setWordWrap(True); layout.addWidget(duck_note)
+        self.duck_box.toggled.connect(self.change_ducking)
+        self.duck_level.valueChanged.connect(self.change_ducking)
         layout = pages['Tekstherkenning']
         areas = QHBoxLayout()
         pick = QPushButton('Kies tekstgebied'); pick.clicked.connect(self.select_region)
@@ -390,6 +404,8 @@ class App:
         self.capture_ok = self.overlay.capture_ok
         user32.SetWindowDisplayAffinity(native_handle(self.root), 0x11)
         self.speaker = Speaker(self.events)
+        self.speaker.duck_enabled = self.duck_box.isChecked()
+        self.speaker.duck_level = self.duck_level.value()
         self.build_google_ocr_settings()
         self.build_cache_settings(pages['Audiocache'])
         self.overlay.text_visible = self.show_text.isChecked()
@@ -511,6 +527,14 @@ class App:
             self.invalidate_page(); dialog.accept()
         buttons.accepted.connect(save); dialog.exec()
 
+    def change_ducking(self, _value):
+        self.speaker.duck_enabled = self.duck_box.isChecked()
+        self.speaker.duck_level = self.duck_level.value()
+        self.duck_level.setEnabled(self.speaker.duck_enabled)
+        self.preferences.setValue('duck_game_audio', self.speaker.duck_enabled)
+        self.preferences.setValue('duck_game_percent', self.speaker.duck_level)
+        self.preferences.sync()
+
     def build_cache_settings(self, layout):
         from sharedcache import server_url
         self.cache_enabled = QCheckBox('Gedeelde audiocache gebruiken en bijdragen')
@@ -563,8 +587,15 @@ class App:
         layout.addRow(help_button)
         model = QComboBox(); model.setEditable(True); model.addItems(['gemini-3.8-flash', 'gemini-2.5-flash'])
         model.setCurrentText(self.ocr_model); layout.addRow('Beeldmodel (geen TTS-model)', model)
-        interval = QSpinBox(); interval.setRange(5, 120); interval.setValue(self.ocr_interval); interval.setSuffix(' seconden')
-        layout.addRow('Minimale tijd tussen aanvragen', interval)
+        interval = QSpinBox(); interval.setRange(1, 120); interval.setValue(self.ocr_limit); interval.setSuffix(' aanvragen/minuut')
+        layout.addRow('Limiet vóór bevestiging', interval)
+        rate_hint = QLabel('Geen vaste wachttijd. Bij de limiet stopt de app en vraagt toestemming voor een extra blok aanvragen. Ook de testknop telt mee; hergebruik van dezelfde afbeelding niet.')
+        rate_hint.setWordWrap(True); layout.addRow(rate_hint)
+        self.ocr_test_button = QPushButton('Test Gemini OCR met dit model')
+        self.ocr_test_result = QLabel('Nog niet getest. De test stuurt één klein voorbeeldplaatje naar Google.')
+        self.ocr_test_result.setWordWrap(True)
+        layout.addRow(self.ocr_test_button); layout.addRow(self.ocr_test_result)
+        self.ocr_test_button.clicked.connect(lambda: self.test_google_ocr(key.text().strip(), model.currentText().strip()))
         buttons = QPushButton('Gemini-instellingen opslaan')
         saved = QLabel(); saved.setWordWrap(True)
         layout.addRow(buttons); layout.addRow(saved)
@@ -573,19 +604,44 @@ class App:
             try: self.speaker.save(self.speaker.settings, keys)
             except OSError:
                 QMessageBox.warning(dialog, 'Opslaan mislukt', 'Windows kon de sleutel niet versleuteld opslaan.'); return
-            self.ocr_model, self.ocr_interval = model.currentText().strip(), interval.value()
+            self.ocr_model, self.ocr_limit = model.currentText().strip(), interval.value()
+            self.ocr_budget.limit = self.ocr_limit
             self.preferences.setValue('ocr_model', self.ocr_model)
-            self.preferences.setValue('ocr_interval', self.ocr_interval)
+            self.preferences.setValue('ocr_requests_per_minute', self.ocr_limit)
             self.preferences.sync(); self.ocr_revision += 1; self.epoch += 1
             self.overlay.hide(); saved.setText('Gemini-instellingen opgeslagen.')
         buttons.clicked.connect(save)
         self.google_key_input = key
 
+    def test_google_ocr(self, key, model):
+        if not key:
+            self.ocr_test_result.setText('Vul eerst een Google API-sleutel in.'); return
+        self.ocr_test_button.setEnabled(False)
+        self.ocr_test_result.setText('Test loopt: voorbeeld herkennen…')
+        def test():
+            started = time.monotonic()
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+                from gemini_ocr import GeminiRecognizer
+                image = Image.new('RGB', (600, 100), 'white')
+                ImageDraw.Draw(image).text((20, 25), 'The heroes enter the forest.', fill='black', font=ImageFont.load_default(size=28))
+                blocks = asyncio.run(GeminiRecognizer(key, model, budget=self.ocr_budget).read(image))
+                if 'heroes' not in ' '.join(b.text for b in blocks).lower():
+                    raise OCRError('Verbinding werkt, maar de voorbeeldtekst is niet correct herkend.')
+                message = f'Werkt: {model} herkende de voorbeeldtekst in {time.monotonic()-started:.1f} seconden.'
+            except OCRBudgetExceeded as exc:
+                self.events.put(('ocr_quota', (str(exc), ('test', key, model))))
+                return
+            except Exception as exc:
+                message = 'Test mislukt: '+str(exc)[:240]
+            self.events.put(('ocr_test', message))
+        threading.Thread(target=test, daemon=True).start()
+
     def create_recognizer(self, provider):
         options = {}
         if provider == 'gemini':
             revision = self.ocr_revision
-            options = dict(key=self.speaker.keys.get('google', ''), model=self.ocr_model, interval=self.ocr_interval,
+            options = dict(key=self.speaker.keys.get('google', ''), model=self.ocr_model, budget=self.ocr_budget,
                 on_wait=lambda: self.events.put(('ocr_wait', self.epoch)),
                 cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
         return Recognizer(provider, **options)
@@ -860,6 +916,9 @@ class App:
                     block.narrated = normalize_spacing(block.narrated)
                 self.events.put(('render', (epoch, hwnd, box, blocks, signature)))
                 rendered = signature
+            except OCRBudgetExceeded as exc:
+                self.enabled.clear()
+                self.events.put(('ocr_quota', (str(exc), ('overlay',))))
             except OCRError as exc:
                 self.trace('Verwerking gepauzeerd: '+str(exc))
                 self.enabled.clear()
@@ -880,6 +939,27 @@ class App:
                 break
             if kind == 'diagnostic':
                 self.debug_view.appendPlainText(value)
+            elif kind == 'ocr_quota':
+                message, retry = value
+                self.ocr_test_button.setEnabled(True)
+                self.status.setText('Gemini OCR geblokkeerd: bevestiging nodig.')
+                self.trace(message)
+                answer = QMessageBox.question(self.root, 'Gemini OCR-limiet bereikt', message+'\nDit kan extra API-tegoed gebruiken.',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if answer == QMessageBox.StandardButton.Yes:
+                    self.ocr_budget.approve()
+                    if retry[0] == 'test': self.test_google_ocr(retry[1], retry[2])
+                    else:
+                        self.enabled.set(); self.start_button.setText('Pauzeer overlay')
+                        self.status.setText('Extra aanvragen toegestaan · klik in het spel')
+                elif retry[0] == 'overlay':
+                    self.start_button.setText('Start overlay')
+                    self.status.setText('Gemini OCR gepauzeerd: extra aanvragen niet toegestaan.')
+                else: self.ocr_test_result.setText('Test gestopt: extra aanvraag niet toegestaan.')
+            elif kind == 'ocr_test':
+                self.ocr_test_button.setEnabled(True)
+                self.ocr_test_result.setText(value)
+                self.trace(value)
             elif kind == 'ocr_ready':
                 provider, message = value
                 if provider == self.ocr_provider: self.ocr_label.setText(message)

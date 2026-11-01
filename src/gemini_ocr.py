@@ -7,12 +7,38 @@ import json
 import math
 import re
 import time
+import threading
+from collections import deque
 from types import SimpleNamespace
 from speech import request, SpeechError
 
 
 class OCRError(Exception):
     pass
+
+
+class OCRBudgetExceeded(OCRError):
+    pass
+
+
+class RequestBudget:
+    def __init__(self, limit=5):
+        self.limit = max(1, int(limit))
+        self.requests = deque()
+        self.extra = 0
+        self.lock = threading.Lock()
+
+    def consume(self):
+        with self.lock:
+            now = time.monotonic()
+            while self.requests and now-self.requests[0] >= 60: self.requests.popleft()
+            if not self.requests: self.extra = 0
+            if len(self.requests) >= self.limit+self.extra:
+                raise OCRBudgetExceeded(f'Al {len(self.requests)} Gemini OCR-aanvragen in de afgelopen minuut. Nog maximaal {self.limit} aanvragen toestaan?')
+            self.requests.append(now)
+
+    def approve(self):
+        with self.lock: self.extra += self.limit
 
 
 def parse_lines(items, width, height):
@@ -37,11 +63,10 @@ def parse_lines(items, width, height):
 
 
 class GeminiRecognizer:
-    def __init__(self, key='', model='gemini-3.8-flash', interval=10, cancelled=None, on_wait=None):
+    def __init__(self, key='', model='gemini-3.8-flash', interval=None, cancelled=None, on_wait=None, budget=None):
         self.key, self.model = key, model
-        self.interval = max(5, min(120, interval))
+        self.budget = budget or RequestBudget()
         self.cancelled = cancelled or (lambda: False)
-        self.last_request = -float('inf')
         self.cache = {}
         self.on_wait = on_wait or (lambda: None)
 
@@ -56,10 +81,8 @@ class GeminiRecognizer:
         digest = hashlib.sha256(pixels).hexdigest()+str(original_size)
         if digest in self.cache: return copy.deepcopy(self.cache[digest])
         self.on_wait()
-        while time.monotonic()-self.last_request < self.interval:
-            if self.cancelled(): return []
-            time.sleep(.1)
         if self.cancelled(): return []
+        self.budget.consume()
         schema = {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'properties': {
             'text': {'type': 'STRING'}, 'box_2d': {'type': 'ARRAY', 'items': {'type': 'INTEGER'}, 'minItems': 4, 'maxItems': 4}},
             'required': ['text', 'box_2d']}}
@@ -69,7 +92,6 @@ class GeminiRecognizer:
                      '[ymin,xmin,ymax,xmax], normalized to 0..1000. Do not invent unreadable text. Return [] when no text is visible.'},
             {'inlineData': {'mimeType': 'image/png', 'data': base64.b64encode(pixels).decode('ascii')}}]}],
             'generationConfig': {'responseMimeType': 'application/json', 'responseSchema': schema, 'temperature': 0}}
-        self.last_request = time.monotonic()
         try:
             result = json.loads(request(f'https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent',
                                         'x-goog-api-key', self.key, payload))

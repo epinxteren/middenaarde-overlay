@@ -61,3 +61,8 @@ Additional dependency notices are retained under `_internal/` and `licenses/` in
 ## Bundled offline OCR
 
 RapidOCR ONNX Runtime 1.4.4 (Apache-2.0), https://github.com/RapidAI/RapidOCR, includes PaddleOCR-derived PP-OCRv4 detection/recognition and text-orientation ONNX models. These models ship with the app; no runtime model download is used. OpenCV (Apache-2.0), Shapely (BSD-3-Clause, with GEOS under LGPL), and pyclipper (MIT with Clipper under Boost Software License) retain their bundled license notices in `_internal/licenses`.
+
+
+## Optional game audio attenuation
+
+Pycaw (MIT), comtypes (MIT), and psutil (BSD-3-Clause) provide Windows audio-session access. Their license files are included in the packaged app.

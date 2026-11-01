@@ -7,7 +7,7 @@ root = Path(SPECPATH)
 datas = []
 binaries = []
 hiddenimports = []
-for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper', 'edge_tts', 'miniaudio', 'certifi', 'rapidocr_onnxruntime']:
+for package in ['ctranslate2', 'sentencepiece', 'winrt', 'piper', 'edge_tts', 'miniaudio', 'certifi', 'rapidocr_onnxruntime', 'pycaw', 'comtypes', 'psutil']:
     d, b, h = collect_all(package)
     datas += d
     binaries += b
@@ -19,7 +19,7 @@ datas += [(str(root/'model'/'translate-en_nl-1_8'/'model'), 'model/translate-en_
           (str(root/'model'/'translate-en_nl-1_8'/'sentencepiece.model'), 'model/translate-en_nl-1_8'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx'), 'voice'),
           (str(root/'voice'/'nl_NL-mls-medium.onnx.json'), 'voice')]
-for package in ['rapidocr-onnxruntime', 'opencv-python', 'Shapely', 'pyclipper', 'six', 'tqdm', 'piper-tts', 'PySide6-Essentials', 'shiboken6', 'ctranslate2', 'sentencepiece',
+for package in ['pycaw', 'comtypes', 'psutil', 'rapidocr-onnxruntime', 'opencv-python', 'Shapely', 'pyclipper', 'six', 'tqdm', 'piper-tts', 'PySide6-Essentials', 'shiboken6', 'ctranslate2', 'sentencepiece',
                 'onnxruntime', 'numpy', 'Pillow', 'winrt-runtime', 'PyYAML', 'protobuf',
                 'edge-tts', 'miniaudio', 'aiohttp', 'certifi', 'cffi', 'pycparser', 'tabulate', 'aiohappyeyeballs', 'aiosignal', 'attrs', 'frozenlist', 'multidict', 'propcache', 'yarl', 'idna', 'flatbuffers', 'pathvalidate', 'packaging', 'typing_extensions', 'pyinstaller']:
     distribution = importlib.metadata.distribution(package)

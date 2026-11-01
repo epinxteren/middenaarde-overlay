@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'src'))
 import overlay
 from PIL import Image
-from gemini_ocr import GeminiRecognizer, OCRError, parse_lines
+from gemini_ocr import GeminiRecognizer, OCRError, parse_lines, RequestBudget, OCRBudgetExceeded
 
 
 class OCRTests(unittest.TestCase):
@@ -39,6 +39,20 @@ class OCRTests(unittest.TestCase):
             self.assertEqual(request.call_args.args[1], 'x-goog-api-key')
             payload = request.call_args.args[3]
             self.assertEqual(payload['contents'][0]['parts'][1]['inlineData']['mimeType'], 'image/png')
+
+    def test_budget_blocks_without_delays_until_approved_or_minute_expires(self):
+        budget = RequestBudget(5)
+        with patch('gemini_ocr.time.monotonic', return_value=10), patch('gemini_ocr.time.sleep') as sleep:
+            for _ in range(5): budget.consume()
+            with self.assertRaises(OCRBudgetExceeded): budget.consume()
+            budget.approve()
+            for _ in range(5): budget.consume()
+            with self.assertRaises(OCRBudgetExceeded): budget.consume()
+            sleep.assert_not_called()
+        with patch('gemini_ocr.time.monotonic', return_value=71):
+            budget.consume()
+            self.assertEqual(len(budget.requests), 1)
+            self.assertEqual(budget.extra, 0)
 
     def test_invalid_boxes_are_rejected(self):
         for box in [[0, 0, 1001, 100], [0, 100, 10, 10], [0, 0, float('nan'), 10]]:
