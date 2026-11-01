@@ -3,6 +3,8 @@ import ctypes as C
 from ctypes import wintypes as W
 import hashlib
 import logging
+from logging.handlers import RotatingFileHandler
+import os
 import queue
 import threading
 import time
@@ -12,12 +14,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter, QSettings
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox, QComboBox, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QScrollArea)
+                               QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox, QComboBox, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QScrollArea, QTabWidget, QPlainTextEdit)
 from PIL import ImageGrab
 from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_handle,
                      find_game, client_box, active_game)
 
 
+from translation import normalize_spacing
 from speech import Speaker
 from voiceui import VoiceDialog
 from gemini_ocr import OCRError
@@ -185,8 +188,8 @@ class Hotkeys(QAbstractNativeEventFilter):
 class App:
     def __init__(self):
         DATA.mkdir(exist_ok=True)
-        logging.basicConfig(filename=DATA/'overlay.log', level=logging.INFO,
-                            format='%(asctime)s %(levelname)s %(message)s', encoding='utf-8')
+        logging.basicConfig(handlers=[RotatingFileHandler(DATA/'overlay.log', maxBytes=2_000_000, backupCount=2, encoding='utf-8', delay=True)], level=logging.INFO,
+                            format='%(asctime)s %(levelname)s %(message)s')
         self.qt = QApplication.instance() or QApplication([])
         self.qt.setApplicationName('Middenaarde Overlay')
         self.events = queue.Queue()
@@ -217,9 +220,9 @@ class App:
         self.was_active = False
         self.root = QWidget(None, Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.root.setWindowTitle('Middenaarde Overlay')
-        self.root.setMinimumSize(450, 500)
+        self.root.setMinimumSize(600, 500)
         available_height = self.qt.primaryScreen().availableGeometry().height()
-        self.root.resize(540, max(500, min(760, available_height - 90)))
+        self.root.resize(660, max(500, min(760, available_height - 90)))
         self.root.move(35, 70)
         self.root.setStyleSheet('''
             QWidget { background:#17212b; color:#e7e0cc; font:10pt "Segoe UI"; }
@@ -228,18 +231,17 @@ class App:
             QPushButton:disabled { color:#8a8f93; }
             QTextEdit { background:#101820; border:1px solid #3e4850; padding:7px; }
             QCheckBox { padding:4px 0; }
+            QTabWidget::pane { border:0; }
+            QTabBar::tab { background:#26333e; color:#c9c6bb; padding:10px 12px; border:0; }
+            QTabBar::tab:selected { background:#3b4b58; color:#f0d699; }
+            QTabBar::tab:hover { background:#33414d; }
+            QPlainTextEdit { background:#101820; color:#e7e0cc; border:1px solid #3e4850; }
         ''')
         window_layout = QVBoxLayout(self.root)
         window_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        content = QWidget()
-        scroll.setWidget(content)
-        window_layout.addWidget(scroll)
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout()
         layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(9)
+        window_layout.addLayout(layout)
         title = QLabel('MIDDEN-AARDE')
         title.setStyleSheet('font: bold 21pt "Segoe UI"; color:#f0d699;')
         layout.addWidget(title)
@@ -257,6 +259,16 @@ class App:
         stop.clicked.connect(lambda: self.speaker.stop())
         buttons.addWidget(stop)
         layout.addLayout(buttons)
+        self.tabs = QTabWidget()
+        window_layout.addWidget(self.tabs, 1)
+        pages = {}
+        for name in ('Overzicht', 'Tekstherkenning', 'Talen & stem', 'Kindvriendelijk', 'Debuglogs'):
+            scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            page = QWidget(); section = QVBoxLayout(page)
+            section.setContentsMargins(18, 14, 18, 14); section.setSpacing(10)
+            scroll.setWidget(page); self.tabs.addTab(scroll, name); pages[name] = section
+        overview = pages['Overzicht']
+        layout = pages['Talen & stem']
         self.read_aloud = QCheckBox('Verhaaltekst automatisch voorlezen')
         self.read_aloud.setChecked(True)
         self.read_aloud.toggled.connect(self.voice_toggle)
@@ -264,6 +276,7 @@ class App:
         voice_button = QPushButton('Stem && providers…')
         voice_button.clicked.connect(self.voice_settings)
         layout.addWidget(voice_button)
+        layout = pages['Tekstherkenning']
         ocr_row = QHBoxLayout()
         ocr_row.addWidget(QLabel('Tekstherkenning'))
         self.ocr_choice = QComboBox()
@@ -280,6 +293,7 @@ class App:
         ocr_settings = QPushButton('Gemini OCR-instellingen…')
         ocr_settings.clicked.connect(self.google_ocr_settings)
         layout.addWidget(ocr_settings)
+        layout = pages['Talen & stem']
         language_row = QHBoxLayout()
         language_row.addWidget(QLabel('Taal overlaytekst'))
         self.overlay_language = QComboBox()
@@ -301,10 +315,13 @@ class App:
         self.download_button = QPushButton('Download ontbrekende taalpakketten')
         self.download_button.clicked.connect(self.download_languages)
         layout.addWidget(self.download_button)
+        layout = overview
         self.show_text = QCheckBox('Overlaytekst tonen in het spel')
         self.show_text.setChecked(self.preferences.value('show_overlay_text', True, type=bool))
         self.show_text.setToolTip('Uit: de oorspronkelijke speltekst blijft zichtbaar. Vertalen en voorlezen blijven werken.')
         layout.addWidget(self.show_text)
+        layout = pages['Kindvriendelijk']
+        layout.addWidget(QLabel('Pas verhaaltekst aan voor jonge spelers.'))
         self.child_friendly_box = QCheckBox('Kindvriendelijk formuleren (Gemini)')
         self.child_friendly_box.setChecked(self.child_friendly)
         self.child_friendly_box.setToolTip('Optioneel: vertaald verhaal verzachten via Google. Gebruikt API-tegoed, ook bij lokale OCR.')
@@ -318,6 +335,8 @@ class App:
         child_settings = QPushButton('Instructie kindvriendelijke tekst…')
         child_settings.clicked.connect(self.child_friendly_settings)
         layout.addWidget(child_settings)
+        layout.addStretch()
+        layout = pages['Tekstherkenning']
         length_row = QHBoxLayout()
         length_row.addWidget(QLabel('Vertaal vanaf'))
         self.minimum_length = QSpinBox()
@@ -329,10 +348,12 @@ class App:
         self.minimum_length.valueChanged.connect(self.change_minimum_length)
         length_row.addWidget(self.minimum_length, 1)
         layout.addLayout(length_row)
+        layout = pages['Talen & stem']
         self.click_to_speak = QCheckBox('Klik op vertaling om voor te lezen / stoppen')
         self.click_to_speak.setChecked(self.preferences.value('click_to_speak', True, type=bool))
         self.click_to_speak.toggled.connect(self.change_click_to_speak)
         layout.addWidget(self.click_to_speak)
+        layout = pages['Tekstherkenning']
         areas = QHBoxLayout()
         pick = QPushButton('Kies tekstgebied'); pick.clicked.connect(self.select_region)
         areas.addWidget(pick)
@@ -341,6 +362,8 @@ class App:
         layout.addLayout(areas)
         self.region_label = QLabel('Gebied: hele spelvenster')
         layout.addWidget(self.region_label)
+        layout.addStretch()
+        layout = overview
         layout.addWidget(QLabel('Laatste vertaling'))
         self.preview = QTextEdit()
         self.preview.setReadOnly(True)
@@ -352,6 +375,17 @@ class App:
         footer = QLabel('Speel in venstermodus (Alt+Enter).\nCtrl+Alt+P: pauze · Ctrl+Alt+S: stop stem')
         footer.setStyleSheet('color:#b5b7af;font-size:9pt;')
         layout.addWidget(footer)
+        logs = pages['Debuglogs']
+        hint = QLabel('Live stappen en tijden: spel vinden, focus, OCR, vertalen en tonen. Geen API-sleutels of verhaaltekst in deze diagnoseberichten.')
+        hint.setWordWrap(True); logs.addWidget(hint)
+        self.debug_view = QPlainTextEdit(); self.debug_view.setReadOnly(True)
+        self.debug_view.setMaximumBlockCount(1000); logs.addWidget(self.debug_view, 1)
+        copy_log = QPushButton('Kopieer zichtbare debuglogs')
+        copy_log.clicked.connect(lambda: self.qt.clipboard().setText(self.debug_view.toPlainText()))
+        logs.addWidget(copy_log)
+        open_logs = QPushButton('Open logmap')
+        open_logs.clicked.connect(lambda: os.startfile(str(DATA)))
+        logs.addWidget(open_logs)
         self.overlay = Overlay()
         self.capture_ok = self.overlay.capture_ok
         user32.SetWindowDisplayAffinity(native_handle(self.root), 0x11)
@@ -375,6 +409,14 @@ class App:
         self.timer.start(100)
         threading.Thread(target=self.worker, daemon=True).start()
 
+    def trace(self, message):
+        now = time.monotonic()
+        if message == getattr(self, '_last_trace', None) and now - getattr(self, '_trace_time', 0) < 10:
+            return
+        self._last_trace, self._trace_time = message, now
+        logging.info(message)
+        self.events.put(('diagnostic', time.strftime('%H:%M:%S') + '  ' + message))
+
     def toggle(self):
         if not self.ready: return
         if not self.enabled.is_set() and (self.downloading or self.missing_languages()):
@@ -385,6 +427,7 @@ class App:
                 'Windows kan de overlay niet uitsluiten van schermopnames. Gebruik Windows 10 versie 2004 of nieuwer.')
             return
         self.epoch += 1
+        self.trace('Overlay pauzeren' if self.enabled.is_set() else 'Overlay gestart')
         if self.enabled.is_set():
             self.enabled.clear()
             self.start_button.setText('Start overlay')
@@ -667,16 +710,21 @@ class App:
                 except Exception:
                     logging.exception('OCR switch')
                     self.events.put(('ocr_ready', (selected_ocr, 'OCR wisselen mislukt; vorige herkenning blijft actief.')))
-            if not self.enabled.is_set(): continue
+            if not self.enabled.is_set():
+                self.trace('Gepauzeerd: klik Start overlay')
+                continue
             try:
                 hwnd = find_game()
                 box = client_box(hwnd)
                 self.target = hwnd
                 if not box:
+                    self.trace('Geen zichtbaar spelvenster gevonden (of geminimaliseerd)')
                     self.events.put(('status', 'Wachten op Journeys in Middle-earth…'))
                     previous = rendered = None
                     continue
                 if not active_game(hwnd):
+                    self.trace('Spel gevonden; wacht op focus. Klik in het spel.')
+                    self.events.put(('status', 'Spel gevonden · klik in het spel om te vertalen'))
                     previous = rendered = None
                     continue
                 epoch, region, minimum = self.epoch, self.region, self.min_chars
@@ -694,10 +742,15 @@ class App:
                     a, b, c, d = region
                     offset = (int(width*a), int(height*b))
                     grab_box = (x+offset[0], y+offset[1], x+int(width*c), y+int(height*d))
+                self.trace(f'OCR starten: {selected_ocr}, gebied {grab_box[2]-grab_box[0]}x{grab_box[3]-grab_box[1]}')
+                self.events.put(('ocr_wait', epoch))
+                started = time.monotonic()
                 image = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 blocks = loop.run_until_complete(recognizer.read(image))
                 if selected_ocr == 'gemini': self.events.put(('ocr_wait_done', epoch))
+                count = len(blocks)
                 blocks = [b for b in blocks if len(b.text.strip()) >= minimum]
+                self.trace(f'OCR klaar in {time.monotonic()-started:.1f}s: {count} blokken, {len(blocks)} boven minimum {minimum}')
                 for block in blocks:
                     block.x += offset[0]; block.y += offset[1]
                 signature = tuple((b.text, round(b.x/8), round(b.y/8), round(b.width/8)) for b in blocks)
@@ -706,12 +759,12 @@ class App:
                     self.events.put(('clear', epoch))
                     previous = signature
                     rendered = None
-                    continue
                 if signature == rendered: continue
                 if not blocks:
                     self.events.put(('status', 'Actief · geen tekst gevonden die aan de ingestelde minimumlengte voldoet'))
                     rendered = signature
                     continue
+                self.trace(f'Vertalen starten: {len(blocks)} blokken naar {output_language}/{narration_language}')
                 self.events.put(('status', 'Tekst in de gekozen taal maken…'))
                 required = {output_language, narration_language}
                 # Keep at most the two active models in memory.
@@ -739,22 +792,30 @@ class App:
                         for i, block in enumerate(blocks):
                             block.translated, block.narrated = rewritten[2*i:2*i+2]
                     if self.closing.is_set() or epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
+                self.trace('Vertaling klaar; controleren of verhaaltekst nog zichtbaar is')
                 fresh = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 if selected_ocr == 'gemini':
                     # Validate locally instead of paying for a second image request.
-                    if fresh.size != image.size or fresh.tobytes() != image.tobytes():
+                    from capturecheck import text_regions_unchanged
+                    if not text_regions_unchanged(image, fresh, blocks, offset):
+                        self.trace('Tekstgebied veranderd tijdens vertalen; opnieuw scannen')
                         previous = rendered = None
                         continue
                     fresh_blocks = blocks
                 else:
                     fresh_blocks = loop.run_until_complete(recognizer.read(fresh))
                 fresh_blocks = [b for b in fresh_blocks if len(b.text.strip()) >= minimum]
-                if [b.text for b in fresh_blocks] != [b.text for b in blocks]:
+                if sorted(b.text for b in fresh_blocks) != sorted(b.text for b in blocks):
+                    self.trace('Herkenning veranderde tijdens vertalen; opnieuw scannen')
                     previous = rendered = None
                     continue
+                for block in blocks:
+                    block.translated = normalize_spacing(block.translated)
+                    block.narrated = normalize_spacing(block.narrated)
                 self.events.put(('render', (epoch, hwnd, box, blocks, signature)))
                 rendered = signature
             except OCRError as exc:
+                self.trace('Verwerking gepauzeerd: '+str(exc))
                 self.enabled.clear()
                 self.events.put(('ocr_failed', str(exc)))
             except Exception as exc:
@@ -771,7 +832,9 @@ class App:
                 kind, value = self.events.get_nowait()
             except queue.Empty:
                 break
-            if kind == 'ocr_ready':
+            if kind == 'diagnostic':
+                self.debug_view.appendPlainText(value)
+            elif kind == 'ocr_ready':
                 provider, message = value
                 if provider == self.ocr_provider: self.ocr_label.setText(message)
             elif kind == 'ocr_wait' and value == self.epoch:
@@ -815,6 +878,7 @@ class App:
             elif kind == 'render':
                 epoch, hwnd, box, blocks, signature = value
                 if epoch != self.epoch or not self.enabled.is_set() or not active_game(hwnd): continue
+                self.trace(f'Overlay getoond: {len(blocks)} vertaalde blokken')
                 self.overlay.progress_text = ''
                 self.overlay.render_blocks(box, blocks)
                 self.last_game_box = box
@@ -840,6 +904,9 @@ class App:
                 self.speaker.stop()
                 self.was_active = True
             else:
+                if not self.was_active and self.overlay.blocks:
+                    self.overlay.render_blocks(box, self.overlay.blocks)
+                    self.trace('Terug in het spel: bestaande overlay hersteld')
                 self.was_active = True
 
     def close_event(self, event):

@@ -1,5 +1,6 @@
 """Bundled CPU OCR; no Windows language pack or runtime model downloads."""
 from types import SimpleNamespace
+import re
 
 
 class PortableRecognizer:
@@ -25,4 +26,7 @@ class PortableRecognizer:
             rect = SimpleNamespace(x=x, y=y, width=(max(xs)-min(xs))/factor,
                                    height=(max(ys)-min(ys))/factor)
             lines.append(SimpleNamespace(words=[SimpleNamespace(text=text, bounding_rect=rect)]))
-        return group_lines(lines)
+        blocks = group_lines(lines)
+        for block in blocks:
+            block.text = re.sub(r'([.!?])(?=[A-Za-zÀ-ÿ])', r'\1 ', block.text)
+        return blocks

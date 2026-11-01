@@ -98,6 +98,22 @@ class UiLanguageTests(unittest.TestCase):
         self.assertEqual(settings.value('narration_language'), 'en')
         self.assertFalse(settings.value('show_overlay_text', type=bool))
 
+    def test_return_to_game_restores_existing_overlay_without_new_translation(self):
+        self.render()
+        self.assertTrue(self.app.overlay.isVisible())
+        self.speaker.reset_mock()
+        with patch('qtui.active_game', return_value=False):
+            self.app.poll()
+        self.assertFalse(self.app.overlay.isVisible())
+        with patch('qtui.active_game', return_value=True):
+            self.app.poll()
+        self.assertTrue(self.app.overlay.isVisible())
+        self.speaker.say.assert_not_called()
+        self.app.show_text.setChecked(False)
+        with patch('qtui.active_game', return_value=False): self.app.poll()
+        with patch('qtui.active_game', return_value=True): self.app.poll()
+        self.assertFalse(self.app.overlay.isVisible())
+
     def test_missing_model_pauses_and_requires_explicit_download(self):
         self.app.enabled.set()
         with patch('qtui.model_available', side_effect=lambda lang, *_: lang != 'de'), \

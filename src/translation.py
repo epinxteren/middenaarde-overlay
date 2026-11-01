@@ -3,6 +3,10 @@ import json
 import re
 
 
+def normalize_spacing(text):
+    return re.sub(r'([.!?])(?=[A-Za-zÀ-ÿ])', r'\1 ', text)
+
+
 class Translator:
     def __init__(self, language="nl", resource=None, data=None, home=None):
         from languagepacks import model_folder
@@ -42,11 +46,11 @@ class Translator:
             self.glossary.update(json.loads(custom.read_text(encoding='utf-8')))
 
     def translate(self, text):
-        if self.language == 'en': return text
+        if self.language == 'en': return normalize_spacing(text)
         if text in self.glossary:
             return self.glossary[text]
         if text in self.cache:
-            return self.cache[text]
+            return normalize_spacing(self.cache[text])
         # Bound long paragraphs; sentencepiece uses the same boundary marker on target pieces.
         parts = re.split(r'(?<=[.!?])\s+', text)
         chunks, current = [], ''
@@ -69,6 +73,7 @@ class Translator:
         if self.language == 'nl':
             output = re.sub(r'\bMiddle[- ]earth\b', 'Midden-aarde', output, flags=re.I)
         output = re.sub(r'\s+([,.!?;:])', r'\1', output)
+        output = re.sub(r'([.!?])(?=[A-Za-zÀ-ÿ])', r'\1 ', output)
         self.cache[text] = output
         if len(self.cache) > 15000:
             self.cache.pop(next(iter(self.cache)))
