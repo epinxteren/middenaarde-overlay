@@ -204,6 +204,8 @@ class App:
         self.ocr_limit = self.preferences.value('ocr_requests_per_minute', 5, type=int)
         self.ocr_budget = RequestBudget(self.ocr_limit)
         self.ocr_revision = 0
+        self.detect_enabled = self.preferences.value('detect_text_first', True, type=bool)
+        self.detect_minimum = self.preferences.value('detect_minimum_lines', 3, type=int)
         self.child_friendly = self.preferences.value('child_friendly', False, type=bool)
         self.child_pause = self.preferences.value('child_pause_on_error', True, type=bool)
         self.child_instruction = self.preferences.value('child_instruction', DEFAULT_INSTRUCTION, type=str)
@@ -221,9 +223,9 @@ class App:
         self.was_active = False
         self.root = QWidget(None, Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.root.setWindowTitle('Middenaarde Overlay')
-        self.root.setMinimumSize(600, 500)
+        self.root.setMinimumSize(800, 500)
         available_height = self.qt.primaryScreen().availableGeometry().height()
-        self.root.resize(660, max(500, min(760, available_height - 90)))
+        self.root.resize(900, max(500, min(760, available_height - 90)))
         self.root.move(35, 70)
         self.root.setStyleSheet('''
             QWidget { background:#17212b; color:#e7e0cc; font:10pt "Segoe UI"; }
@@ -263,11 +265,13 @@ class App:
         self.tabs = QTabWidget()
         window_layout.addWidget(self.tabs, 1)
         pages = {}
-        for name in ('Overzicht', 'Tekstherkenning', 'Talen / Stem', 'Kindvriendelijk', 'Audiocache', 'Debuglogs'):
+        for name in ('Overzicht', 'Detectie', 'Tekstherkenning', 'Talen / Stem', 'Kindvriendelijk', 'Audiocache', 'Debuglogs', 'Informatie'):
             scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
             page = QWidget(); section = QVBoxLayout(page)
             section.setContentsMargins(18, 14, 18, 14); section.setSpacing(10)
             scroll.setWidget(page); self.tabs.addTab(scroll, name); pages[name] = section
+        self.build_detection_settings(pages['Detectie'])
+        self.build_information(pages['Informatie'])
         overview = pages['Overzicht']
         layout = pages['Talen / Stem']
         self.read_aloud = QCheckBox('Verhaaltekst automatisch voorlezen')
@@ -526,6 +530,44 @@ class App:
             self.preferences.setValue('child_instruction', text); self.preferences.sync()
             self.invalidate_page(); dialog.accept()
         buttons.accepted.connect(save); dialog.exec()
+
+    def build_detection_settings(self, layout):
+        title = QLabel('Eerst lokaal controleren of er genoeg tekst staat')
+        title.setWordWrap(True); layout.addWidget(title)
+        self.detect_box = QCheckBox('Snelle tekstdetectie vóór OCR inschakelen')
+        self.detect_box.setChecked(self.detect_enabled); layout.addWidget(self.detect_box)
+        row = QHBoxLayout(); row.addWidget(QLabel('OCR starten vanaf'))
+        self.detect_lines = QSpinBox(); self.detect_lines.setRange(1, 30)
+        self.detect_lines.setValue(self.detect_minimum); self.detect_lines.setSuffix(' mogelijke tekstregels')
+        row.addWidget(self.detect_lines); layout.addLayout(row)
+        note = QLabel('Deze lichte controle draait lokaal, zonder Gemini-aanvraag. Ze zoekt vormen van tekstregels; ze leest de woorden nog niet. Bij genoeg regels start Ingebouwd, Microsoft of Gemini OCR. Bij ongewijzigde tekst hergebruikt de app de vorige vertaling. Afbeeldingen met veel lijnen kunnen ook als tekst worden gezien. Verlaag de grens of zet de controle uit als echte tekst wordt gemist.')
+        note.setWordWrap(True); layout.addWidget(note)
+        self.detect_status = QLabel('Nog geen beeld gecontroleerd. Start de overlay en klik in het spel.')
+        self.detect_status.setWordWrap(True); layout.addWidget(self.detect_status)
+        self.detect_box.toggled.connect(self.change_detection)
+        self.detect_lines.valueChanged.connect(self.change_detection)
+        layout.addStretch()
+
+    def change_detection(self, _value):
+        self.detect_enabled = self.detect_box.isChecked()
+        self.detect_minimum = self.detect_lines.value()
+        self.preferences.setValue('detect_text_first', self.detect_enabled)
+        self.preferences.setValue('detect_minimum_lines', self.detect_minimum)
+        self.preferences.sync(); self.invalidate_page()
+
+    def build_information(self, layout):
+        text = QTextEdit(); text.setReadOnly(True)
+        text.setHtml("""<h2>Hoe werkt de overlay?</h2>
+        <p><b>1. Spelbeeld:</b> alleen het actieve Journeys in Middle-earth-venster of jouw gekozen tekstgebied wordt bekeken. Buiten het spel wordt de overlay verborgen; bij terugkeer komt de bestaande vertaling terug.</p>
+        <p><b>2. Snelle detectie (lokaal):</b> de app zoekt mogelijke tekstregels met beeldanalyse. Dit is geen OCR en kost geen API-aanvraag. Bij minder dan de ingestelde hoeveelheid wacht de app op een volgend beeld.</p>
+        <p><b>3. Tekst herkennen (OCR):</b> pas daarna leest de gekozen provider de Engelse woorden en hun positie. Ingebouwd en Microsoft blijven lokaal; Gemini ontvangt het geselecteerde beeldgebied. De lokale teller blokkeert na standaard 5 Gemini OCR-aanvragen per minuut en vraagt bevestiging voor meer.</p>
+        <p><b>4. Vertalen:</b> de herkende Engelse tekst wordt lokaal vertaald naar de gekozen overlay- en voorleestaal. Gemini OCR is dus tekstherkenning, niet de gewone vertaler. Tekstblokken onder de minimumlengte worden overgeslagen.</p>
+        <p><b>5. Kindvriendelijk (optioneel):</b> Gemini herschrijft de vertaalde tekst met jouw instructie. Dit is een aparte online aanvraag; de OCR-teller telt deze niet mee.</p>
+        <p><b>6. Tonen:</b> de app controleert of de tekst nog op dezelfde pagina staat en legt de vertaling over het Engels. Ongewijzigde tekst wordt hergebruikt; animatie buiten tekstgebieden hoeft geen nieuwe OCR-aanvraag te veroorzaken.</p>
+        <p><b>7. Voorlezen:</b> de gekozen stem leest de vertaling. Een ingestelde gedeelde audiocache wordt eerst geraadpleegd. Zonder opname maakt de provider nieuwe audio; met uploadsleutel kan die worden gedeeld. Optioneel wordt alleen het spelgeluid tijdelijk zachter.</p>
+        <p><b>Wat gaat online?</b> Gemini OCR: spelbeeldgebied. Kindvriendelijk: vertaalde tekst. Online spraak: voorleestekst. Audiocache: audio plus een technische cachesleutel, geen screenshot of provider-API-sleutel. Ingebouwde/Microsoft OCR, lokale vertaling en Piper werken lokaal.</p>
+        <p><b>Problemen?</b> Bekijk Detectie voor gevonden regels en meettijd. Debuglogs toont focus, OCR-tijden, filters, vertalen en cache. Alleen wacht- en foutmeldingen verschijnen in de speloverlay.</p>""")
+        layout.addWidget(text)
 
     def change_ducking(self, _value):
         self.speaker.duck_enabled = self.duck_box.isChecked()
@@ -799,6 +841,7 @@ class App:
         asyncio.set_event_loop(loop)
         previous, rendered, previous_epoch = None, None, -1
         rewriter, rewrite_settings = None, None
+        cached_image, cached_blocks, cached_layout = None, None, None
         while not self.closing.is_set():
             if self.closing.wait(0.65): break
             if self.ocr_provider != selected_ocr or self.ocr_revision != selected_revision:
@@ -836,6 +879,7 @@ class App:
                 if epoch != previous_epoch:
                     previous = rendered = None
                     previous_epoch = epoch
+                    cached_image = cached_blocks = cached_layout = None
                 x, y, right, bottom = box
                 width, height = right-x, bottom-y
                 offset = (0, 0)
@@ -844,10 +888,32 @@ class App:
                     a, b, c, d = region
                     offset = (int(width*a), int(height*b))
                     grab_box = (x+offset[0], y+offset[1], x+int(width*c), y+int(height*d))
+                image = ImageGrab.grab(bbox=grab_box, all_screens=True)
+                layout_signature = None
+                if getattr(self, 'detect_enabled', False):
+                    from textdetect import detect_text
+                    started_detection = time.monotonic()
+                    detected = detect_text(image)
+                    layout_signature = detected.layout
+                    message = f'{detected.lines} mogelijke tekstregels · {(time.monotonic()-started_detection)*1000:.0f} ms · grens {self.detect_minimum}'
+                    self.events.put(('detect_status', message))
+                    if detected.lines < self.detect_minimum:
+                        self.trace('Detectie: te weinig tekst; geen OCR-aanvraag')
+                        self.events.put(('detection_empty', epoch))
+                        previous = rendered = None
+                        cached_image = cached_blocks = cached_layout = None
+                        continue
+                if cached_image is not None and rendered is not None:
+                    from capturecheck import text_regions_unchanged
+                    identical = image.size == cached_image.size and image.tobytes() == cached_image.tobytes()
+                    unchanged_text = (layout_signature is not None and layout_signature == cached_layout
+                                      and text_regions_unchanged(cached_image, image, cached_blocks, offset))
+                    if identical or unchanged_text:
+                        self.trace('Tekst ongewijzigd: bestaande vertaling hergebruikt, geen OCR-aanvraag')
+                        continue
                 self.trace(f'OCR starten: {selected_ocr}, gebied {grab_box[2]-grab_box[0]}x{grab_box[3]-grab_box[1]}')
                 self.events.put(('ocr_wait', epoch))
                 started = time.monotonic()
-                image = ImageGrab.grab(bbox=grab_box, all_screens=True)
                 blocks = loop.run_until_complete(recognizer.read(image))
                 if selected_ocr == 'gemini': self.events.put(('ocr_wait_done', epoch))
                 count = len(blocks)
@@ -916,6 +982,7 @@ class App:
                     block.narrated = normalize_spacing(block.narrated)
                 self.events.put(('render', (epoch, hwnd, box, blocks, signature)))
                 rendered = signature
+                cached_image, cached_blocks, cached_layout = image, blocks, layout_signature
             except OCRBudgetExceeded as exc:
                 self.enabled.clear()
                 self.events.put(('ocr_quota', (str(exc), ('overlay',))))
@@ -939,6 +1006,12 @@ class App:
                 break
             if kind == 'diagnostic':
                 self.debug_view.appendPlainText(value)
+            elif kind == 'detect_status':
+                self.detect_status.setText(value)
+            elif kind == 'detection_empty' and value == self.epoch:
+                if self.overlay.blocks: self.speaker.stop()
+                self.overlay.blocks = []; self.overlay.click_regions = []; self.overlay.hide()
+                self.status.setText('Detectie: wacht op voldoende tekst; OCR nog niet gestart')
             elif kind == 'ocr_quota':
                 message, retry = value
                 self.ocr_test_button.setEnabled(True)

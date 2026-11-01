@@ -161,7 +161,7 @@ class UiLanguageTests(unittest.TestCase):
 
 
 class WorkerLanguageTests(unittest.TestCase):
-    def test_worker_translates_overlay_and_narration_independently(self, child=False, failure=False, pause=True):
+    def test_worker_translates_overlay_and_narration_independently(self, child=False, failure=False, pause=True, gated=False):
         class StopAfterThreeScans:
             count = 0
             def is_set(self): return False
@@ -169,8 +169,10 @@ class WorkerLanguageTests(unittest.TestCase):
                 self.count += 1
                 return self.count > 3
         class Recognizer:
+            calls = 0
             backend, warning = 'Test OCR', ''
             async def read(self, image):
+                Recognizer.calls += 1
                 return [Block('The heroes enter the forest.', 1, 2, 200, 100, 20)]
         import queue
         import threading
@@ -183,6 +185,7 @@ class WorkerLanguageTests(unittest.TestCase):
         app.ocr_provider, app.ocr_revision = 'portable', 0
         app.child_friendly, app.child_instruction = child, 'Verzacht de tekst'
         app.child_pause = pause
+        app.detect_enabled, app.detect_minimum = gated, 3
         app.speaker = MagicMock(); app.speaker.keys = {'google': 'test'}
         app.ocr_model = 'test-model'
         app.create_recognizer = lambda provider: Recognizer()
@@ -193,11 +196,19 @@ class WorkerLanguageTests(unittest.TestCase):
         with patch('qtui.Recognizer', Recognizer), patch('qtui.Translator', side_effect=translator) as models, \
                 patch('qtui.find_game', return_value=1), patch('qtui.client_box', return_value=(0, 0, 800, 600)), \
                 patch('qtui.active_game', return_value=True), patch('qtui.ImageGrab.grab'), \
-                patch('qtui.ChildFriendlyRewriter') as rewrite:
+                patch('qtui.ChildFriendlyRewriter') as rewrite, \
+                patch('textdetect.detect_text') as detection:
+            detection.return_value.lines = 0
+            detection.return_value.layout = ()
             rewrite.return_value.rewrite.side_effect = (qtui.ChildFriendlyError('Testfout') if failure else lambda texts: ['Zacht: '+t for t in texts])
             app.worker()
         events = list(app.events.queue)
         renders = [value for kind, value in events if kind == 'render']
+        if gated:
+            self.assertEqual(renders, [])
+            self.assertEqual(Recognizer.calls, 0)
+            models.assert_not_called()
+            return
         if failure and pause:
             self.assertEqual(renders, [])
             self.assertFalse(app.enabled.is_set())
@@ -212,6 +223,9 @@ class WorkerLanguageTests(unittest.TestCase):
 
     def test_worker_softens_both_languages_before_rendering(self):
         self.test_worker_translates_overlay_and_narration_independently(child=True)
+
+    def test_preflight_skips_ocr_and_translation_when_no_text(self):
+        self.test_worker_translates_overlay_and_narration_independently(gated=True)
 
     def test_rewrite_failure_can_continue_with_normal_translation(self):
         self.test_worker_translates_overlay_and_narration_independently(child=True, failure=True, pause=False)
