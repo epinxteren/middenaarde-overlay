@@ -53,6 +53,41 @@ class UiLanguageTests(unittest.TestCase):
         self.app.overlay_language.setCurrentIndex(self.app.overlay_language.findData(overlay))
         self.app.narration_language.setCurrentIndex(self.app.narration_language.findData(narration))
 
+    def test_english_has_only_icon_outside_original_text_and_uses_narration(self):
+        from PySide6.QtCore import QRect, QPoint, Qt
+        from PySide6.QtGui import QImage
+        from PySide6.QtTest import QTest
+        self.set_languages('en', 'nl')
+        layer = self.app.overlay
+        self.assertTrue(layer.original_english)
+        block = Block('Original English', 100, 100, 300, 80, 20,
+                      'Original English', 'Nederlandse voorleestekst')
+        layer.resize(800, 600)
+        layer.blocks = [block]
+        image = QImage(800, 600, QImage.Format.Format_ARGB32)
+        layer.render(image)
+        # The source area stays transparent (the layer's magenta color key).
+        self.assertEqual(image.pixelColor(150, 120).name(), '#ff00ff')
+        self.assertEqual(len(layer.click_regions), 1)
+        icon, text = layer.click_regions[0]
+        self.assertFalse(icon.intersects(QRect(100, 100, 300, 80)))
+        self.assertEqual(icon.size().width(), 22)
+        self.assertEqual(text, block.narrated)
+        handler = MagicMock()
+        layer.set_click_handler(handler)
+        QTest.mouseClick(layer, Qt.MouseButton.LeftButton, pos=icon.center())
+        handler.assert_called_once_with(block.narrated)
+        self.set_languages('nl', 'nl')
+        self.assertFalse(layer.original_english)
+
+    def test_merge_distance_is_saved_and_invalidates_previous_page(self):
+        epoch = self.app.epoch
+        self.app.block_gap_input.setValue(42)
+        self.assertEqual(self.app.block_gap, 42)
+        self.assertGreater(self.app.epoch, epoch)
+        settings = qtui.QSettings(str(Path(self.folder.name)/'ui.ini'), qtui.QSettings.Format.IniFormat)
+        self.assertEqual(settings.value('block_merge_gap', type=int), 42)
+
     def render(self, epoch=None):
         self.app.enabled.set()
         self.app.target = 1

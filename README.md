@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.4.4).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.4.5).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -283,3 +283,10 @@ Voer met de ontwikkelafhankelijkheden `python tools/game_simulator.py simulator-
 Op **Vertaalhulp** zie je de oorspronkelijke Engelse OCR-tekst naast de vertaling. Schrijf wat er niet klopt en klik **Vraag AI om verbetering**. Gemini krijgt alle tekstblokken van die pagina samen, je vraag, de doeltalen en context over **The Lord of the Rings: Journeys in Middle-earth**, het coöperatieve bordspel in Midden-aarde. Zo kan bijvoorbeeld *deduction* als *logisch redeneren* worden vertaald in plaats van *aftrek*.
 
 De AI toont een voorstel en uitleg. Je kunt doorvragen; pas met **Gebruik verbeterde tekst** neem je het voorstel over voor overlay en voorleestekst. Getallen mogen niet veranderen. Correcties worden lokaal opgeslagen in `data/corrections.json` en bij dezelfde Engelse tekst en taal hergebruikt. Voorstellen voor een inmiddels gewijzigde pagina worden niet toegepast. De kindvriendelijke instructie wordt meegenomen als die optie aanstaat. Deze extra Gemini-tekstaanvragen gebruiken API-tegoed en vallen niet onder de OCR-aanvraagteller. Controleer regels en betekenis voor je een voorstel toepast.
+
+
+### Tekstblokken samenvoegen en Engels origineel
+
+Op **Tekstherkenning** stel je **Tekstblokken samenvoegen tot** in (standaard 24 px, bereik 0–500). Dit is de verticale afstand in fysieke spelpixels. Horizontaal overlappende tekstvakken worden samengevoegd, ook bij gecentreerde tekst, verschillende lettergroottes of overlappende OCR-vakken. 0 voegt alleen rakende of overlappende vakken samen. Losse kolommen blijven gescheiden zolang hun tekstvakken niet overlappen. De instelling wordt opgeslagen en geldt direct, vóór de minimumlengte, vertaling en het voorlezen.
+
+Bij **Engels (origineel)** blijft de originele speltekst zichtbaar. Er verschijnt alleen een klein afspeelicoontje naast het tekstblok; klik daarop om voor te lezen of te stoppen in de gekozen voorleestaal. Het icoon bedekt geen herkend tekstvak. Als geen ruimte naast, boven of onder het blok beschikbaar is, wordt het icoon overgeslagen. Gebruik dan **Lees laatste tekst opnieuw**. De bestaande instellingen voor klikken en overlayweergave blijven gelden.

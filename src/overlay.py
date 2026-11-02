@@ -27,7 +27,7 @@ from translation import Translator
 RESOURCE = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
 HOME = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 DATA = HOME / 'data'
-VERSION = '0.4.4'
+VERSION = '0.4.5'
 user32 = C.WinDLL('user32', use_last_error=True)
 kernel32 = C.WinDLL('kernel32', use_last_error=True)
 try:
@@ -123,6 +123,44 @@ class Block:
     narrated: str = ''
 
 
+def merge_blocks(blocks, max_gap=24):
+    """Join connected text areas in physical pixels, independent of alignment.
+
+    Work on copies so regrouping never mutates OCR cache entries. Recheck the
+    resulting rectangles: joining staggered rows can create a new intersection.
+    """
+    from dataclasses import replace
+    groups = [[replace(b)] for b in sorted(blocks, key=lambda b: (b.y, b.x))]
+
+    def bounds(group):
+        return (min(b.x for b in group), min(b.y for b in group),
+                max(b.x+b.width for b in group), max(b.y+b.height for b in group))
+
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(groups)):
+            a = bounds(groups[i])
+            for j in range(i+1, len(groups)):
+                b = bounds(groups[j])
+                horizontal = min(a[2], b[2])-max(a[0], b[0])
+                vertical_gap = max(a[1], b[1])-min(a[3], b[3])
+                if horizontal > 0 and vertical_gap <= max(0, max_gap):
+                    groups[i].extend(groups.pop(j))
+                    changed = True
+                    break
+            if changed: break
+    result = []
+    for group in groups:
+        group.sort(key=lambda b: (b.y, b.x))
+        left, top, right, bottom = bounds(group)
+        result.append(Block(' '.join(b.text for b in group), left, top,
+                            right-left, bottom-top, min(b.line_height for b in group),
+                            ' '.join(b.translated for b in group).strip(),
+                            ' '.join(b.narrated for b in group).strip()))
+    return sorted(result, key=lambda b: (b.y, b.x))
+
+
 def group_lines(lines):
     """Split horizontal controls, then join visually adjacent paragraph lines."""
     fragments = []
@@ -148,25 +186,9 @@ def group_lines(lines):
         x, y = min(r.x for r in rects), min(r.y for r in rects)
         right, bottom = max(r.x+r.width for r in rects), max(r.y+r.height for r in rects)
         rows.append(Block(txt, x, y, right-x, bottom-y, bottom-y))
-    blocks = []
-    for row in sorted(rows, key=lambda b: (b.y, b.x)):
-        candidates = []
-        for block in blocks:
-            gap = row.y - (block.y + block.height)
-            overlap = min(block.x+block.width, row.x+row.width)-max(block.x, row.x)
-            aligned = abs(row.x-block.x) < max(24, row.line_height*1.7)
-            if (0 <= gap <= row.line_height*0.9 and aligned and overlap > 0
-                    and 0.65 < row.line_height / max(block.line_height, 1) < 1.5):
-                candidates.append((gap, block))
-        if candidates:
-            block = min(candidates, key=lambda p: p[0])[1]
-            right = max(block.x+block.width, row.x+row.width)
-            block.text += ' ' + row.text
-            block.width = right-block.x
-            block.height = row.y+row.height-block.y
-        else:
-            blocks.append(row)
-    return blocks
+    # Keep rows separate in the OCR cache. The UI's adjustable pixel distance
+    # is applied after lookup, before length filtering and translation.
+    return sorted(rows, key=lambda b: (b.y, b.x))
 
 
 class WindowsRecognizer:

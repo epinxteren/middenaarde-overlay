@@ -22,7 +22,7 @@ def run(output):
     from unittest.mock import patch
     with patch.object(overlay, 'WindowsRecognizer', side_effect=AssertionError('Windows OCR must not be used')):
         recognizer = overlay.Recognizer()
-        blocks = asyncio.run(recognizer.read(image))
+        blocks = overlay.merge_blocks(asyncio.run(recognizer.read(image)), 24)
     story = next(b for b in blocks if 'forest' in b.text)
     assert 'bridge' in story.text, [b.text for b in blocks]
     assert any(b.text == 'Continue' for b in blocks)

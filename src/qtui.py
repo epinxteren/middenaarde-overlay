@@ -15,12 +15,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QAbstractNativeEventFilter, QSettings
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QPolygon
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QCheckBox, QTextEdit, QMessageBox, QRubberBand, QSpinBox, QComboBox, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QScrollArea, QTabWidget, QPlainTextEdit)
 from PIL import ImageGrab
 from overlay import (DATA, RESOURCE, Translator, Recognizer, user32, native_handle,
-                     find_game, client_box, active_game)
+                     find_game, client_box, active_game, merge_blocks)
 
 
 from translation import normalize_spacing
@@ -58,6 +58,7 @@ class Overlay(QWidget):
         self.setStyleSheet('background:#ff00ff;')
         self.blocks = []
         self.text_visible = True
+        self.original_english = False
         self.progress_text = ''
         self.click_handler = None
         self.click_regions = []
@@ -77,30 +78,48 @@ class Overlay(QWidget):
         painter.scale(1/ratio, 1/ratio)
         physical_width, physical_height = int(self.width()*ratio), int(self.height()*ratio)
         self.click_regions = []
+        source_rects = [QRect(int(b.x), int(b.y), int(b.width), int(b.height)) for b in self.blocks]
         for block in self.blocks:
             if not block.translated: continue
-            x, y = max(0, int(block.x)-5), max(0, int(block.y)-3)
-            w = min(physical_width-x, max(45, int(block.width)+10))
-            h = min(physical_height-y, max(20, int(block.height)+8))
+            if self.original_english:
+                # Put the control outside all source text, including neighbours.
+                icon = self.play_icon_rect(block, source_rects, physical_width, physical_height)
+                if icon is not None:
+                    painter.setPen(QPen(QColor('#9c8451'), 1))
+                    painter.setBrush(QColor('#211e18'))
+                    painter.drawRoundedRect(icon, 4, 4)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor('#f5e8c7'))
+                    x, y = icon.x(), icon.y()
+                    painter.drawPolygon(QPolygon([QPoint(x+8, y+5), QPoint(x+8, y+17), QPoint(x+17, y+11)]))
+                    self.click_regions.append((icon, block.narrated or block.translated))
+                continue
+            x, y = max(0, int(block.x)), max(0, int(block.y))
+            w = min(physical_width-x, int(block.width))
+            h = min(physical_height-y, int(block.height))
             if w < 15 or h < 10: continue
             rect = QRect(x+5, y+3, w-10, h-6)
             font = QFont('Segoe UI')
             initial = max(11, min(32, int(block.line_height*0.95)))
             flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap)
-            for size in range(initial, 8, -1):
+            for size in range(initial, 6, -1):
                 font.setPixelSize(size)
                 metrics = QFontMetrics(font)
                 text_rect = metrics.boundingRect(rect, flags, block.translated)
                 if text_rect.height() <= rect.height(): break
-            # If needed, expand down slightly rather than silently omit translated words.
-            draw_h = min(physical_height-y, max(h, text_rect.height()+8))
+            # Stay inside the source area so long translations cannot cover
+            # a neighbouring block. Clip text to the same panel.
+            draw_h = h
             painter.setPen(QPen(QColor('#9c8451'), 1))
             painter.setBrush(QColor('#211e18'))
             painter.drawRoundedRect(QRect(x, y, w, draw_h), 3, 3)
             self.click_regions.append((QRect(x, y, w, draw_h), block.narrated or block.translated))
             painter.setPen(QColor('#f5e8c7'))
             painter.setFont(font)
+            painter.save()
+            painter.setClipRect(QRect(x, y, w, draw_h))
             painter.drawText(QRect(x+5, y+3, w-10, draw_h-6), flags, block.translated)
+            painter.restore()
 
         if self.progress_text:
             font = QFont('Segoe UI'); font.setPixelSize(13)
@@ -113,6 +132,16 @@ class Overlay(QWidget):
                 painter.setFont(font); painter.setPen(QColor('#f0d699'))
                 painter.drawText(status_rect.adjusted(10, 4, -10, -4),
                     int(Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap), self.progress_text)
+
+    def play_icon_rect(self, block, source_rects, width, height):
+        size, margin = 22, 5
+        x, y, right, bottom = int(block.x), int(block.y), int(block.x+block.width), int(block.y+block.height)
+        candidates = [QRect(x-size-margin, y, size, size), QRect(right+margin, y, size, size),
+                      QRect(x, y-size-margin, size, size), QRect(x, bottom+margin, size, size)]
+        screen = QRect(0, 0, width, height)
+        occupied = source_rects + [rect for rect, _ in self.click_regions]
+        return next((rect for rect in candidates if screen.contains(rect)
+                     and not any(rect.intersects(other) for other in occupied)), None)
 
     def set_click_handler(self, handler):
         self.click_handler = handler
@@ -224,6 +253,7 @@ class App:
         self.child_pause = self.preferences.value('child_pause_on_error', True, type=bool)
         self.child_instruction = self.preferences.value('child_instruction', DEFAULT_INSTRUCTION, type=str)
         self.min_chars = max(0, min(10000, self.preferences.value('minimum_characters', 30, type=int)))
+        self.block_gap = max(0, min(500, self.preferences.value('block_merge_gap', 24, type=int)))
         self.output_language = language_code(self.preferences.value('overlay_language', 'nl'))
         self.narration_choice = self.preferences.value('narration_language', 'same')
         if self.narration_choice not in LANGUAGES and self.narration_choice != 'same': self.narration_choice = 'same'
@@ -374,6 +404,16 @@ class App:
         self.minimum_length.valueChanged.connect(self.change_minimum_length)
         length_row.addWidget(self.minimum_length, 1)
         layout.addLayout(length_row)
+        gap_row = QHBoxLayout()
+        gap_row.addWidget(QLabel('Tekstblokken samenvoegen tot'))
+        self.block_gap_input = QSpinBox()
+        self.block_gap_input.setRange(0, 500)
+        self.block_gap_input.setSuffix(' px')
+        self.block_gap_input.setValue(self.block_gap)
+        self.block_gap_input.setToolTip('Maximale verticale afstand in spelpixels. Ook gecentreerde tekst wordt samengevoegd als de tekstvakken horizontaal overlappen. 0: alleen rakende of overlappende vakken.')
+        self.block_gap_input.valueChanged.connect(self.change_block_gap)
+        gap_row.addWidget(self.block_gap_input, 1)
+        layout.addLayout(gap_row)
         layout = pages['Talen / Stem']
         self.click_to_speak = QCheckBox('Klik op vertaling om voor te lezen / stoppen')
         self.click_to_speak.setChecked(self.preferences.value('click_to_speak', True, type=bool))
@@ -434,6 +474,7 @@ class App:
         self.build_google_ocr_settings()
         self.build_cache_settings(pages['Audiocache'])
         self.overlay.text_visible = self.show_text.isChecked()
+        self.overlay.original_english = self.output_language == 'en'
         self.change_click_to_speak(self.click_to_speak.isChecked())
         self.show_text.toggled.connect(self.change_overlay_visibility)
         self.overlay_language.currentIndexChanged.connect(self.change_languages)
@@ -834,7 +875,7 @@ class App:
                 cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
         from localcache import CachedRecognizer, cache_directory
         return CachedRecognizer(Recognizer(provider, **options), cache_directory(DATA)/'ocr-cache',
-                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop], self.cache_similarity/100)
+                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop, 'rows-v2'], self.cache_similarity/100)
 
     def change_ocr(self):
         self.ocr_provider = self.ocr_choice.currentData()
@@ -887,6 +928,7 @@ class App:
 
     def change_languages(self, _index):
         self.output_language = self.overlay_language.currentData()
+        self.overlay.original_english = self.output_language == 'en'
         self.narration_choice = self.narration_language.currentData()
         self.preferences.setValue('overlay_language', self.output_language)
         self.preferences.setValue('narration_language', self.narration_choice)
@@ -933,6 +975,12 @@ class App:
             box = client_box(self.target)
             if box and box == self.last_game_box:
                 self.overlay.render_blocks(box, self.overlay.blocks)
+
+    def change_block_gap(self, value):
+        self.block_gap = value
+        self.preferences.setValue('block_merge_gap', value)
+        self.preferences.sync()
+        self.invalidate_page()
 
     def change_minimum_length(self, value):
         self.min_chars = value
@@ -1025,6 +1073,7 @@ class App:
                     self.events.put(('status', 'Spel gevonden · klik in het spel om te vertalen'))
                     continue
                 epoch, region, minimum = self.epoch, self.region, self.min_chars
+                block_gap = getattr(self, 'block_gap', 24)
                 child_enabled, child_instruction = self.child_friendly, self.child_instruction
                 child_pause = self.child_pause
                 output_language, narration_language = self.output_language, self.current_speech_language()
@@ -1094,6 +1143,7 @@ class App:
                 else:
                     self.trace('Bekende pagina uit lokale cache: OCR overgeslagen')
                 if selected_ocr == 'gemini': self.events.put(('ocr_wait_done', epoch))
+                blocks = merge_blocks(blocks, block_gap)
                 count = len(blocks)
                 blocks = [b for b in blocks if len(b.text.strip()) >= minimum]
                 self.trace(f'OCR klaar in {time.monotonic()-started:.1f}s: {count} blokken, {len(blocks)} boven minimum {minimum}')
@@ -1183,6 +1233,7 @@ class App:
                     fresh_blocks = blocks
                 else:
                     fresh_blocks = loop.run_until_complete(recognizer.read(fresh))
+                    fresh_blocks = merge_blocks(fresh_blocks, block_gap)
                 fresh_blocks = [b for b in fresh_blocks if len(b.text.strip()) >= minimum]
                 if sorted(b.text for b in fresh_blocks) != sorted(b.text for b in blocks):
                     self.trace('Herkenning veranderde tijdens vertalen; opnieuw scannen')
