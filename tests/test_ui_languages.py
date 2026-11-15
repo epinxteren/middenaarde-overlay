@@ -53,6 +53,43 @@ class UiLanguageTests(unittest.TestCase):
         self.app.overlay_language.setCurrentIndex(self.app.overlay_language.findData(overlay))
         self.app.narration_language.setCurrentIndex(self.app.narration_language.findData(narration))
 
+    def test_card_reader_pauses_overlay_and_restores_previous_state(self):
+        self.app.enabled.set()
+        dialog = MagicMock()
+        def during():
+            self.assertFalse(self.app.enabled.is_set())
+            self.speaker.stop.reset_mock()
+            self.app.events.put(('clear', self.app.epoch))
+            self.app.events.put(('ocr_failed', 'stale game failure'))
+            self.app.poll()
+            self.speaker.stop.assert_not_called()
+        dialog.exec.side_effect = during
+        with patch('cardui.CardDialog', return_value=dialog): self.app.card_reader()
+        self.assertTrue(self.app.enabled.is_set())
+        self.assertIsNone(self.app.card_dialog)
+        self.app.enabled.clear()
+        with patch('cardui.CardDialog', return_value=dialog): self.app.card_reader()
+        self.assertFalse(self.app.enabled.is_set())
+
+    def test_card_dialog_reads_saved_card_and_closes_without_camera(self):
+        from cardui import CardDialog
+        with patch('cardui.cache_directory', return_value=Path(self.folder.name)):
+            dialog = CardDialog(self.app)
+        try:
+            key = dialog.library.save('Attack 2. Move 3.', b'photo')
+            options = self.app.card_options(True)
+            dialog.library.reading(key, options, 'Aanval 2. Beweeg 3.')
+            dialog.refresh_library()
+            dialog.load_saved()
+            dialog.worker.join(3)
+            dialog.poll()
+            self.assertEqual(dialog.text.toPlainText(), 'Aanval 2. Beweeg 3.')
+            self.speaker.say.assert_called_with('Aanval 2. Beweeg 3.', language=options['language'])
+        finally:
+            dialog.reject()
+        self.assertTrue(dialog.cancelled.is_set())
+        self.assertFalse(dialog.timer.isActive())
+
     def test_english_has_only_icon_outside_original_text_and_uses_narration(self):
         from PySide6.QtCore import QRect, QPoint, Qt
         from PySide6.QtGui import QImage

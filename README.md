@@ -2,7 +2,7 @@
 
 A portable Windows companion with local translation and selectable offline or online narration for **The Lord of the Rings: Journeys in Middle-earth**. It recognizes English text in the game window, draws a Dutch translation over the same text area, and reads longer passages aloud in Dutch. It does not modify the game or its saves.
 
-**Experimental release (0.4.5).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
+**Experimental release (0.4.6).** OCR, layout grouping and machine translation can make mistakes, especially with decorative fonts, icons, moving text and short rules terms. The first release has passed a synthetic OCR → translation → Dutch audio integration test and a Windows overlay-exclusion test. A complete live campaign has not been tested. Always check the English text when a rule or number seems odd.
 
 **Use version 0.2.2 or newer.** The 0.2.0 portable package omitted an audio dependency; 0.2.1 fixed this and tests the packaged executable before publishing.
 
@@ -72,6 +72,7 @@ Version 0.2.3 adds **Vertaal vanaf** (minimum English block length, default 30 c
 | **Lees laatste tekst opnieuw** | Read the latest translation again, including short text when no story paragraph was found |
 | **Ctrl+Alt+P** | Start/pause while the game is focused |
 | **Ctrl+Alt+S** | Stop speech |
+| **Ctrl+Alt+K** | Open the webcam card reader; pause game recognition until it closes |
 
 Each new text page is allowed to settle before translation. A translation is discarded if the source page changes while it is being translated. New text stops the old narration. Identical story text is not automatically narrated twice during the same app session; use the repeat button to hear it again.
 
@@ -290,3 +291,23 @@ De AI toont een voorstel en uitleg. Je kunt doorvragen; pas met **Gebruik verbet
 Op **Tekstherkenning** stel je **Tekstblokken samenvoegen tot** in (standaard 24 px, bereik 0–500). Dit is de verticale afstand in fysieke spelpixels. Horizontaal overlappende tekstvakken worden samengevoegd, ook bij gecentreerde tekst, verschillende lettergroottes of overlappende OCR-vakken. 0 voegt alleen rakende of overlappende vakken samen. Losse kolommen blijven gescheiden zolang hun tekstvakken niet overlappen. De instelling wordt opgeslagen en geldt direct, vóór de minimumlengte, vertaling en het voorlezen.
 
 Bij **Engels (origineel)** blijft de originele speltekst zichtbaar. Er verschijnt alleen een klein afspeelicoontje naast het tekstblok; klik daarop om voor te lezen of te stoppen in de gekozen voorleestaal. Het icoon bedekt geen herkend tekstvak. Als geen ruimte naast, boven of onder het blok beschikbaar is, wordt het icoon overgeslagen. Gebruik dan **Lees laatste tekst opnieuw**. De bestaande instellingen voor klikken en overlayweergave blijven gelden.
+
+## Kaarten lezen met een webcam (v0.4.6)
+
+Open **Kaarten → Kaartscanner openen** of druk tijdens het spelen op **Ctrl+Alt+K**. De spelherkenning pauzeert zolang de scanner open is; bij sluiten wordt de eerdere aan/uit-status hersteld. **Ctrl+Alt+S** stopt ook het voorlezen van een kaart.
+
+1. Kies het cameranummer (meestal 0), staand/liggend en de brontaal: Engelse kaart vertalen, of kaart al in de ingestelde voorleestaal.
+2. Klik **Camera starten / volgende kaart**. Houd één kaart recht, volledig binnen het groene kader, met voldoende licht en zonder reflecties.
+3. Zodra het beeld scherp en ongeveer een seconde stabiel is, controleert de ingebouwde offline OCR de tekst. Pas na twee gelijke herkenningen slaat de app automatisch de uitgesneden kaartfoto en tekst op. De camera sluit daarna automatisch.
+4. De tekst wordt voorbereid in je gekozen voorleestaal. Automatische AI-vertaalcontrole en kindvriendelijke instellingen gelden ook voor kaarten. De gekozen stem leest automatisch voor als het vinkje aanstaat. Gebruik **Opnieuw voorlezen**, **Stop stem**, of **volgende kaart**.
+5. Eerder gelezen kaarten staan onderaan en kunnen zonder webcam opnieuw worden gelezen.
+
+Kaartfoto’s, oorspronkelijke tekst en voorbereide tekst staan lokaal in `%LOCALAPPDATA%\MiddenaardeOverlay\cache\cards\cards.sqlite3` in de verpakte app. De bibliotheek blijft bestaan na herstart en bij een nieuwe appversie. Kaarten worden gekoppeld via dezelfde tekst, onafhankelijk van de foto; andere getallen, leestekens of woorden blijven aparte kaarten. Geen onzekere visuele gelijkenis tussen verschillende spelkaarten. Een opnieuw gescande kaart vereist dus wel lokale OCR, maar daarna kunnen tekst en audio worden hergebruikt. De audiocache onderscheidt provider, stem, model, taal en steminstellingen. Bestaande tekst- en audiocaches blijven behouden.
+
+Foto’s worden niet geüpload. Online stemmen ontvangen voorleestekst; ingeschakelde Gemini-tekstverbetering ontvangt kaarttekst. Eventueel ingestelde openbare audiodeling blijft de bestaande instelling volgen. Er wordt steeds één kaart gescand; klik voor de volgende kaart opnieuw op de cameraknop. Pictogrammen, grafische spelregels, heel kleine tekst en ontbrekende kaartdelen worden niet betrouwbaar herkend. Controleer belangrijke regels tegen de kaart. Als de camera niet opent: sluit andere camera-apps, probeer een ander nummer en geef Windows desktop-apps cameratoegang via Instellingen → Privacy en beveiliging → Camera.
+
+### Webcam card reader (English)
+
+Use **Ctrl+Alt+K**, choose a camera and portrait/landscape, then click the camera button. Align one complete card inside the green frame. Sharpness, exposure, stability and two matching offline OCR results gate automatic capture. One card is captured per scan; the camera closes after capture. Saved cards can be read again without a camera. The game overlay pauses while the reader is open and resumes its previous state when closed. Text, cropped photos and prepared readings persist locally across restarts; narration reuses the existing provider/voice/settings-specific audio cache. Icons and graphical rules are not reliably recognized. The reader is game-independent. English cards can be translated; otherwise select that the card is already in the chosen narration language.
+
+Version 0.4.6 also retries suspicious joined words in internal OCR, accepting only added spaces with unchanged letters and punctuation. Old offline OCR entries are refreshed once; translation and audio caches are retained. Verified with the two supplied story screenshots and automated camera, library, cancellation and overlay-interaction tests. No physical webcam was available on the development machine.

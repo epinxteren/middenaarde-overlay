@@ -220,6 +220,7 @@ class Hotkeys(QAbstractNativeEventFilter):
             if msg.message == 0x0312:
                 if msg.wParam == 1: self.owner.toggle()
                 elif msg.wParam == 2: self.owner.speaker.stop()
+                elif msg.wParam == 3: self.owner.card_reader()
                 return True, 0
         return False, 0
 
@@ -315,7 +316,7 @@ class App:
         self.tabs = QTabWidget()
         window_layout.addWidget(self.tabs, 1)
         pages = {}
-        for name in ('Overzicht', 'Detectie', 'Tekstherkenning', 'Talen / Stem', 'Kindvriendelijk', 'Audiocache', 'Vertaalhulp', 'Debuglogs', 'Informatie'):
+        for name in ('Overzicht', 'Detectie', 'Tekstherkenning', 'Talen / Stem', 'Kaarten', 'Kindvriendelijk', 'Audiocache', 'Vertaalhulp', 'Debuglogs', 'Informatie'):
             scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QScrollArea.Shape.NoFrame)
             page = QWidget(); section = QVBoxLayout(page)
             section.setContentsMargins(18, 14, 18, 14); section.setSpacing(10)
@@ -323,6 +324,15 @@ class App:
         self.build_detection_settings(pages['Detectie'])
         self.build_information(pages['Informatie'])
         self.build_translation_help(pages['Vertaalhulp'])
+        card_info = QLabel('Lees fysieke spelkaarten met je webcam. Ctrl+Alt+K opent de kaartscanner tijdens het spelen. '
+                           'De spelherkenning pauzeert zolang de scanner open is en hervat bij sluiten. '
+                           'Kaartfoto’s, herkende tekst en voorbereide voorleestekst blijven lokaal bewaard, ook na herstart. '
+                           'Voorlezen gebruikt je gekozen stem en bestaande audiocache. '
+                           'De ingebouwde OCR werkt offline; eventuele AI-tekstverbetering en online stemmen gebruiken je gekozen diensten.')
+        card_info.setWordWrap(True); pages['Kaarten'].addWidget(card_info)
+        card_button = QPushButton('Kaartscanner openen · Ctrl+Alt+K')
+        card_button.clicked.connect(self.card_reader); pages['Kaarten'].addWidget(card_button)
+        pages['Kaarten'].addStretch()
         overview = pages['Overzicht']
         layout = pages['Talen / Stem']
         self.read_aloud = QCheckBox('Verhaaltekst automatisch voorlezen')
@@ -484,9 +494,11 @@ class App:
         self.hotkey_filter = Hotkeys(self)
         self.qt.installNativeEventFilter(self.hotkey_filter)
         user32.RegisterHotKey.argtypes = [W.HWND, C.c_int, W.UINT, W.UINT]
-        for code, key in [(1, ord('P')), (2, ord('S'))]:
+        for code, key in [(1, ord('P')), (2, ord('S')), (3, ord('K'))]:
             if user32.RegisterHotKey(native_handle(self.root), code, 0x4003, key):
                 self.hotkeys.append(code)
+            elif code == 3:
+                card_button.setText('Kaartscanner openen · sneltoets bezet')
         self.root.closeEvent = self.close_event
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll)
@@ -502,6 +514,7 @@ class App:
         self.events.put(('diagnostic', time.strftime('%H:%M:%S') + '  ' + message))
 
     def toggle(self):
+        if getattr(self, 'card_dialog', None): return
         if not self.ready: return
         if not self.enabled.is_set() and (self.downloading or self.missing_languages()):
             self.status.setText('Download eerst de ontbrekende taalpakketten.')
@@ -538,6 +551,53 @@ class App:
             self.ocr_revision += 1
             self.refresh_language_controls()
         self.voice_dialog = None
+
+    def card_reader(self):
+        if getattr(self, 'card_dialog', None):
+            self.card_dialog.raise_(); self.card_dialog.activateWindow(); return
+        from cardui import CardDialog
+        resume = self.enabled.is_set()
+        self.enabled.clear(); self.epoch += 1; self.was_active = False
+        self.overlay.hide(); self.speaker.stop()
+        self.start_button.setText('Kaartscanner actief')
+        try:
+            self.card_dialog = CardDialog(self)
+            self.card_dialog.exec()
+        except Exception as exc:
+            QMessageBox.warning(self.root, 'Kaartscanner', str(exc))
+        finally:
+            self.card_dialog = None
+            self.epoch += 1
+            if resume and not self.closing.is_set(): self.enabled.set()
+            self.start_button.setText('Pauzeer overlay' if self.enabled.is_set() else 'Start overlay')
+
+    def card_options(self, translate):
+        return dict(version=1, translate=translate, language=self.current_speech_language(),
+                    review=self.auto_review, model=self.auto_review_model,
+                    child=self.child_friendly, child_model=self.ocr_model,
+                    instruction=self.child_instruction, pause=self.child_pause)
+
+    def prepare_card(self, text, options):
+        from overlay import Block
+        from translationhelp import review
+        language = options['language']
+        result = Translator(language).translate(text) if options['translate'] else text
+        if options['review'] and options['translate']:
+            block = Block(text, 0, 0, 1, 1, 1, result, result)
+            answer = review(self.speaker.keys.get('google', ''), options['model'], [block],
+                            'Maak de vertaling natuurlijk en correct. Behoud alle regels, namen en getallen.',
+                            language, language, card=True)
+            result = answer['items'][0]['narration']
+        warning = ''
+        if options['child']:
+            try:
+                result = ChildFriendlyRewriter(self.speaker.keys.get('google', ''),
+                    options['child_model'], options['instruction']).rewrite([result])[0]
+            except ChildFriendlyError:
+                if options['pause']: raise
+                self.trace('Kaart: kindvriendelijke bewerking mislukt; gewone tekst gebruikt volgens instelling.')
+                warning = 'Kindvriendelijke bewerking mislukt; gewone tekst gebruikt volgens instelling.'
+        return result, warning
 
     def voice_toggle(self, enabled):
         if not enabled: self.speaker.stop()
@@ -875,7 +935,8 @@ class App:
                 cancelled=lambda: self.closing.is_set() or not self.enabled.is_set() or self.ocr_provider != provider or self.ocr_revision != revision)
         from localcache import CachedRecognizer, cache_directory
         return CachedRecognizer(Recognizer(provider, **options), cache_directory(DATA)/'ocr-cache',
-                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop, 'rows-v2'], self.cache_similarity/100)
+                                [provider, self.ocr_model if provider == 'gemini' else '', self.ocr_crop,
+                                 'rows-v2' if provider == 'gemini' else 'rows-v3-spaces'], self.cache_similarity/100)
 
     def change_ocr(self):
         self.ocr_provider = self.ocr_choice.currentData()
@@ -1267,6 +1328,8 @@ class App:
                 kind, value = self.events.get_nowait()
             except queue.Empty:
                 break
+            if getattr(self, 'card_dialog', None) and kind not in ('diagnostic', 'speech_error', 'speech_status', 'ready', 'languages_ready', 'fatal'):
+                continue
             if kind == 'diagnostic':
                 self.debug_view.appendPlainText(value)
             elif kind == 'review_answer':
@@ -1333,6 +1396,9 @@ class App:
             elif kind == 'fatal':
                 self.status.setText('Starten mislukt: '+value)
             elif kind == 'speech_error':
+                if getattr(self, 'card_dialog', None):
+                    self.card_dialog.status.setText('Voorlezen mislukt: '+value)
+                    continue
                 self.voice_ok = True
                 if getattr(self, "voice_dialog", None): self.voice_dialog.status.setText(value)
                 self.read_aloud.setChecked(False)
@@ -1340,6 +1406,9 @@ class App:
                 self.show_progress('Voorlezen mislukt: '+value[:140])
             elif kind == 'speech_status':
                 generation, message = value
+                if getattr(self, 'card_dialog', None):
+                    if generation == self.speaker.generation and message: self.card_dialog.status.setText(message)
+                    continue
                 if generation == self.speaker.generation:
                     if message or self.overlay.progress_text == 'Spraak laden…': self.show_progress(message)
             elif kind == 'status' and self.enabled.is_set():
@@ -1379,6 +1448,7 @@ class App:
                 if self.read_aloud.isChecked() and self.voice_ok and spoken_text and digest not in self.spoken:
                     self.spoken.add(digest)
                     self.speaker.say(spoken_text, language=self.current_speech_language())
+        if getattr(self, 'card_dialog', None): return
         if self.target:
             box = client_box(self.target)
             if not active_game(self.target) or not box or not self.enabled.is_set():
@@ -1399,6 +1469,7 @@ class App:
 
     def close_event(self, event):
         self.enabled.clear(); self.epoch += 1; self.closing.set()
+        if getattr(self, 'card_dialog', None): self.card_dialog.reject()
         self.speaker.close()
         for code in self.hotkeys:
             user32.UnregisterHotKey(native_handle(self.root), code)

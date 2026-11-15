@@ -10,6 +10,9 @@ def run(output):
     from PIL import Image, ImageDraw, ImageFont
     from piper import PiperVoice, SynthesisConfig
     from PySide6.QtWidgets import QApplication, QWidget
+    from cards import CardLibrary, readable_text
+    from cardui import CardDialog
+    import tempfile
     from ctypes import wintypes as W
     import ctypes as C
     overlay.DATA.mkdir(exist_ok=True)
@@ -26,6 +29,10 @@ def run(output):
     story = next(b for b in blocks if 'forest' in b.text)
     assert 'bridge' in story.text, [b.text for b in blocks]
     assert any(b.text == 'Continue' for b in blocks)
+    with tempfile.TemporaryDirectory() as card_temp:
+        library = CardLibrary(Path(card_temp))
+        key = library.save(readable_text(blocks), b'self-test')
+        assert CardLibrary(Path(card_temp)).entries()[0][0] == key
     translator = overlay.Translator()
     nl = translator.translate(story.text)
     assert 'helden' in nl.lower() and 'bos' in nl.lower(), nl
